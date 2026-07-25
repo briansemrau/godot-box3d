@@ -17,6 +17,7 @@ constexpr int SUB_STEP_COUNT = 4;
 Box3DSpace3D::Box3DSpace3D() {
 	b3WorldDef def = b3DefaultWorldDef();
 	def.workerCount = 1;
+	def.userData = this;
 	world_id = b3CreateWorld(&def);
 
 	direct_state = memnew(Box3DPhysicsDirectSpaceState3D);
@@ -270,4 +271,14 @@ void Box3DSpace3D::flush_queries() {
 	pending_area_events.clear();
 
 	flushing_queries = false;
+}
+
+void Box3DSpace3D::set_custom_filter_callback(const Callable& p_callback) {
+	custom_filter_callback = p_callback;
+	b3World_SetCustomFilterCallback(world_id, p_callback.is_valid() ? box3d_api_custom_filter_trampoline : nullptr, this);
+}
+
+void Box3DSpace3D::set_pre_solve_callback(const Callable& p_callback) {
+	pre_solve_callback = p_callback;
+	b3World_SetPreSolveCallback(world_id, p_callback.is_valid() ? box3d_api_pre_solve_trampoline : nullptr, this);
 }

@@ -42,6 +42,8 @@ public:
 
 	Box3DShapeImpl3D* get_shape(int32_t p_index) const;
 
+	b3ShapeId get_shape_id(int32_t p_index) const;
+
 	Transform3D get_shape_transform(int32_t p_index) const;
 
 	void set_shape_transform(int32_t p_index, const Transform3D& p_transform);

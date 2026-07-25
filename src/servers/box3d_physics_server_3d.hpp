@@ -37,6 +37,14 @@ public:
 
 	Box3DJointImpl3D* get_joint(const RID& p_rid) const { return joint_owner.get_or_null(p_rid); }
 
+	Box3DShapedObjectImpl3D* get_shaped_object(const RID& p_rid) const;
+
+	// RID owner accessors for the direct API layer (Box3DAPI).
+	const RID_PtrOwner<Box3DSpace3D>& get_space_owner() const { return space_owner; }
+	const RID_PtrOwner<Box3DBodyImpl3D>& get_body_owner() const { return body_owner; }
+	const RID_PtrOwner<Box3DShapeImpl3D>& get_shape_owner() const { return shape_owner; }
+	const RID_PtrOwner<Box3DJointImpl3D>& get_joint_owner() const { return joint_owner; }
+
 	// --- Shapes ---
 	RID _world_boundary_shape_create() override;
 	RID _separation_ray_shape_create() override;
@@ -59,6 +67,8 @@ public:
 
 	// --- Space ---
 	RID _space_create() override;
+
+	RID space_create(bool p_with_default_area);
 	void _space_set_active(const RID& p_space, bool p_active) override;
 	bool _space_is_active(const RID& p_space) const override;
 	void _space_set_param(const RID& p_space, PhysicsServer3D::SpaceParameter p_param, double p_value) override;
@@ -261,8 +271,6 @@ protected:
 	static void _bind_methods() {}
 
 private:
-	Box3DShapedObjectImpl3D* _get_shaped_object(const RID& p_rid) const;
-
 	static Box3DPhysicsServer3D* singleton;
 
 	RID_PtrOwner<Box3DSpace3D> space_owner;

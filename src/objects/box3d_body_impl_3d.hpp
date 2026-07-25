@@ -142,6 +142,10 @@ public:
 
 	const Variant& get_force_integration_userdata() const { return force_integration_userdata; }
 
+	void set_user_data(const Variant& p_data) { user_data = p_data; }
+
+	Variant get_user_data() const { return user_data; }
+
 	int32_t get_max_contacts_reported() const { return max_contacts_reported; }
 
 	void set_max_contacts_reported(int32_t p_count) { max_contacts_reported = p_count; }
@@ -207,4 +211,6 @@ private:
 	bool contact_monitor_enabled = false;
 
 	Box3DPhysicsDirectBodyState3D* direct_state = nullptr;
+
+	Variant user_data;
 };

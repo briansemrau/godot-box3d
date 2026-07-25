@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/variant.hpp>
 
 #include <box3d/id.h>
 
@@ -44,10 +45,15 @@ public:
 
 	void set_index(uint32_t p_index) { index = p_index; }
 
+	void set_user_data(const Variant& p_data) { user_data = p_data; }
+
+	Variant get_user_data() const { return user_data; }
+
 private:
 	Box3DShapeImpl3D* shape = nullptr;
 	Transform3D transform;
 	b3ShapeId shape_id = b3_nullShapeId;
 	uint32_t index = 0;
 	bool disabled = false;
+	Variant user_data;
 };

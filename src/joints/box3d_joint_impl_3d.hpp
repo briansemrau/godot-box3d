@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/physics_server3d.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/variant.hpp>
 
 #include <box3d/id.h>
 
@@ -37,6 +38,10 @@ public:
 
 	void set_collision_disabled(bool p_disabled);
 
+	void set_user_data(const Variant& p_data) { user_data = p_data; }
+
+	Variant get_user_data() const { return user_data; }
+
 	// Called by the server once both bodies (or either body's space attachment) may have
 	// changed, to (re)build the live b3JointId if both bodies now have a b3BodyId.
 	void rebuild();
@@ -57,4 +62,5 @@ private:
 	Box3DBodyImpl3D* body_b = nullptr;
 	b3JointId joint_id = b3_nullJointId;
 	bool collision_disabled = false;
+	Variant user_data;
 };
