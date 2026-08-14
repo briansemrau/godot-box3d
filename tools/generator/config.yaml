@@ -270,7 +270,7 @@ array_params:
         count_field: pointCount
         return_element: Box3DLocalManifoldPoint
         default_capacity: 4
-  b3CollideSphereAndTriangle:
+  b3CollideTriangleAndSphere:
     manifold:
       direction: output
       count_param: capacity
@@ -280,11 +280,10 @@ array_params:
         count_field: pointCount
         return_element: Box3DLocalManifoldPoint
         default_capacity: 4
-    triangleB:
+    triangleA:
       direction: input
-      count_param: triangleBCount
       fixed_count: 3
-  b3CollideCapsuleAndTriangle:
+  b3CollideTriangleAndCapsule:
     manifold:
       direction: output
       count_param: capacity
@@ -294,11 +293,10 @@ array_params:
         count_field: pointCount
         return_element: Box3DLocalManifoldPoint
         default_capacity: 4
-    triangleB:
+    triangleA:
       direction: input
-      count_param: triangleBCount
       fixed_count: 3
-  b3CollideHullAndTriangle:
+  b3CollideTriangleAndHull:
     manifold:
       direction: output
       count_param: capacity
@@ -339,6 +337,22 @@ array_params:
         return_element: Box3DLocalManifoldPoint
         default_capacity: 4
 
+# Pointer-array pair struct fields: C fields shaped as (Type* arr, int count)
+# that should be exposed as a single Godot Packed*Array property instead of
+# skipped. The generated data class owns deep storage for the pointed-to
+# elements; the count field is consumed (derived from the array's size).
+pointer_array_fields:
+  b3ShapeProxy:
+    points:
+      count_field: count
+  b3MeshDef:
+    vertices:
+      count_field: vertexCount
+    indices:
+      count_field: triangleCount
+    materialIndices:
+      count_field: triangleCount
+
 # Skip list: structs that shouldn't have data class generation.
 # Collision query types (clean) are now generated as data classes.
 # Types with pointer fields, opaque handles, or complex arrays remain skipped.
@@ -347,11 +361,6 @@ skip_structs:
   - b3DynamicTree
   - b3Recording
   - b3RecPlayer
-  # Complex data structures (pointer fields, heap-allocated internals).
-  # b3HullData/b3MeshData/b3HeightData/b3CompoundData are NOT here: they are
-  # heap blobs inferred by the parser and wrapped in owning RefCounted classes.
-  # Shape proxy with pointer array field (temporarily unbound; audit complains)
-  - b3ShapeProxy
   # Collision internals with complex array patterns
   - b3Simplex
   - b3Manifold

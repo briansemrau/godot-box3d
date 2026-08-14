@@ -356,6 +356,12 @@ _STRUCT_RE = re.compile(
     re.DOTALL,
 )
 
+# Anonymous typedef struct: `typedef struct { ... } b3Name;` (e.g. b3SATCache).
+_ANON_STRUCT_RE = re.compile(
+    r'typedef\s+struct\s*\{(?P<body>.*?)\}\s*(?P<name>b3\w+)\s*;',
+    re.DOTALL,
+)
+
 _FIELD_RE = re.compile(
     r'(?P<type>(?:const\s+)?\w+(?:\s*\*)?)(?:\s+)(?P<name>\w+)(?:\[(?P<array>[\w]+)\])?\s*;'
 )
@@ -386,29 +392,42 @@ def _extract_field_doc(body: str, field_start: int) -> str:
 
 
 def parse_structs(text: str, header: str = "") -> list[Struct]:
-    """Extract all typedef struct definitions from header text."""
+    """Extract all typedef struct definitions from header text.
+
+    Handles both forms:
+      typedef struct b3Name { ... } b3Name;
+      typedef struct { ... } b3Name;   (anonymous, e.g. b3SATCache)
+    """
     structs = []
     for m in _STRUCT_RE.finditer(text):
-        struct_doc = _parse_doc_block(_extract_doc_block_before(text, m.start()))
-        body = m.group("body")
-        fields = []
-        for fm in _FIELD_RE.finditer(body):
-            ftype = fm.group("type").strip()
-            field_doc = _extract_field_doc(body, fm.start())
-            fields.append(StructField(
-                type=ftype.replace("*", "").strip(),
-                name=fm.group("name"),
-                array_size=fm.group("array"),  # str: "24" or "B3_SOME_MACRO"
-                pointer="*" in ftype,
-                doc=field_doc,
-            ))
-        structs.append(Struct(
-            name=m.group("name"),
-            fields=fields,
-            header=header,
-            doc=struct_doc.summary,
-        ))
+        structs.append(_parse_struct_match(m, text, header))
+    for m in _ANON_STRUCT_RE.finditer(text):
+        # Skip matches already captured by the named regex (it also requires a
+        # name, so anonymous forms never overlap).
+        structs.append(_parse_struct_match(m, text, header))
     return structs
+
+
+def _parse_struct_match(m, text: str, header: str) -> Struct:
+    struct_doc = _parse_doc_block(_extract_doc_block_before(text, m.start()))
+    body = m.group("body")
+    fields = []
+    for fm in _FIELD_RE.finditer(body):
+        ftype = fm.group("type").strip()
+        field_doc = _extract_field_doc(body, fm.start())
+        fields.append(StructField(
+            type=ftype.replace("*", "").strip(),
+            name=fm.group("name"),
+            array_size=fm.group("array"),  # str: "24" or "B3_SOME_MACRO"
+            pointer="*" in ftype,
+            doc=field_doc,
+        ))
+    return Struct(
+        name=m.group("name"),
+        fields=fields,
+        header=header,
+        doc=struct_doc.summary,
+    )
 
 
 # --- Enum parsing ---

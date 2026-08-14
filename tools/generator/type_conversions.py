@@ -6,7 +6,7 @@ generator, and docs generator.
 """
 
 from classification import infer_clone_fn
-from naming import to_godot_class_name
+from naming import packed_array_type, to_godot_class_name
 from parser import Function, is_scalar_type, is_struct_type
 
 
@@ -37,6 +37,14 @@ def to_godot_type(b3_type: str, type_map: dict, qualified: bool = True, is_point
             if gt in ("Vector3", "Quaternion", "Transform3D", "AABB", "Basis", "Plane"):
                 return f"{q}{gt}"
             return gt
+
+    # Scalar pointer (e.g. uint8_t* bytes, int* indices) → Packed*Array.
+    # char* is handled above as String. Non-array scalar pointers are rejected
+    # by classification, so this only fires for array-shaped params/returns.
+    if is_pointer:
+        packed = packed_array_type(t)
+        if packed:
+            return f"{q}{packed}"
 
     if is_scalar_type(t):
         return t
@@ -139,6 +147,12 @@ def godot_default_value(b3_type: str, type_map: dict, is_pointer: bool = False) 
     if t in type_map.get("enums", []):
         return f"({t})0"
 
+    # Pointer-returned scalar arrays → default empty Packed*Array.
+    if is_pointer:
+        packed = packed_array_type(t)
+        if packed:
+            return f"{packed}()"
+
     if is_struct_type(t):
         cls_name = to_godot_class_name(t)
         return f"Ref<{cls_name}>()"
@@ -173,6 +187,10 @@ def array_element_godot_type(b3_type: str, type_map: dict, qualified: bool = Tru
             if gt.startswith("Packed"):
                 return f"{q}{gt}"
             return f"{q}PackedInt64Array"
+
+    packed = packed_array_type(b3_type)
+    if packed:
+        return f"{q}{packed}"
 
     if is_struct_type(t):
         return f"{q}Array"

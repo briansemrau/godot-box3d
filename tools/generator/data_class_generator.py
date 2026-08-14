@@ -10,7 +10,7 @@ from pathlib import Path
 
 from classification import blob_structs, infer_clone_fn, infer_destroy_fn, prepare_type_map
 from config import load_config
-from naming import data_class_filename, to_godot_class_name, to_snake_case
+from naming import data_class_filename, packed_array_type, to_godot_class_name, to_snake_case
 from parser import (
     Struct,
     parse_headers,
@@ -20,6 +20,13 @@ from struct_model import (
     classify_field,
     collect_convertible_fields,
     compute_struct_dependencies,
+    is_pair_struct_name,
+    pair_count_field,
+    pair_elem_b3_type,
+    pair_is_math,
+    pair_packed_type,
+    pair_paths,
+    pair_storage_name,
     resolve_field_type,
     topological_sort,
 )
@@ -94,27 +101,59 @@ def _is_child_struct(struct: Struct, type_map: dict, all_struct_names: set,
     return True
 
 
+PACKED_ARRAY_HEADERS = {
+    "PackedByteArray": "packed_byte_array",
+    "PackedInt32Array": "packed_int32_array",
+    "PackedInt64Array": "packed_int64_array",
+    "PackedFloat32Array": "packed_float32_array",
+    "PackedFloat64Array": "packed_float64_array",
+    "PackedVector2Array": "packed_vector2_array",
+    "PackedVector3Array": "packed_vector3_array",
+    "PackedVector4Array": "packed_vector4_array",
+    "PackedColorArray": "packed_color_array",
+}
+
+
+def _packed_include(packed: str) -> str:
+    """godot-cpp include line for a Packed*Array type."""
+    header = PACKED_ARRAY_HEADERS.get(packed)
+    if header is None:
+        return ""
+    return f"#include <godot_cpp/variant/{header}.hpp>"
+
+
+def _pair_redirect_name(path: str) -> str:
+    """Redirect helper name for a pair path (relative to the owning class)."""
+    return "set_" + "_".join(to_snake_case(seg) for seg in path.split(".")) + "_storage"
+
+
+def _count_path(path: str, count_field: str) -> str:
+    """Replace the leaf pair field in a dot path with its count field name."""
+    parts = path.split(".")
+    parts[-1] = count_field
+    return ".".join(parts)
+
+
 def generate_header(struct: Struct, type_map: dict, all_struct_names: set,
-                    skip_structs: set) -> tuple[str, list[str]]:
+                    skip_structs: set, structs: list) -> tuple[str, list[str]]:
     """Generate header file for a data class.
 
     Returns (header_content, warnings).
     """
     cls_name = to_godot_class_name(struct.name)
     warnings = []
-    convertible_fields = []
+    convertible_fields = collect_convertible_fields(struct, type_map, all_struct_names, skip_structs)
 
     for field in struct.fields:
         cls = classify_field(field, type_map, all_struct_names, skip_structs)
-        if cls not in (FieldClassification.POINTER, FieldClassification.SKIP_ARRAY, FieldClassification.UNKNOWN):
-            convertible_fields.append((field, cls))
-        else:
+        if cls in (FieldClassification.POINTER, FieldClassification.SKIP_ARRAY, FieldClassification.UNKNOWN):
             warnings.append(f"  {struct.name}.{field.name}: skipping ({field.type})")
 
     if not convertible_fields:
         return "", warnings
 
     is_child = _is_child_struct(struct, type_map, all_struct_names, skip_structs)
+    pairs = pair_paths(struct, type_map, structs) if structs else []
 
     lines = [
         "#pragma once",
@@ -135,6 +174,8 @@ def generate_header(struct: Struct, type_map: dict, all_struct_names: set,
     for field, cls in convertible_fields:
         if cls == FieldClassification.NESTED_STRUCT:
             nested_includes.add(field.type)
+        if cls == FieldClassification.NESTED_PAIR_STRUCT:
+            nested_includes.add(field.type)
 
     # Include nested data class headers
     for nested_type in sorted(nested_includes):
@@ -143,6 +184,18 @@ def generate_header(struct: Struct, type_map: dict, all_struct_names: set,
         if nested_type.startswith("b3"):
             nested_file = nested_file[2:]  # strip b3 prefix
         lines.append(f'#include "box3d_{nested_file}.gen.hpp"')
+
+    # Pointer-array pair fields need the godot::Vector template and the Packed*
+    # array header for their element type.
+    if pairs:
+        lines.append("#include <godot_cpp/templates/vector.hpp>")
+        packed_set = set()
+        for _path, leaf_field, _count in pairs:
+            packed_set.add(pair_packed_type(leaf_field, type_map))
+        for packed in sorted(packed_set):
+            inc = _packed_include(packed)
+            if inc:
+                lines.append(inc)
 
     lines.append("")
     lines.append("using namespace godot;")
@@ -162,6 +215,14 @@ def generate_header(struct: Struct, type_map: dict, all_struct_names: set,
         lines.append(
             f"{T}void set_as_view({struct.name}* p_data, RefCounted* p_parent);"
         )
+
+    # Internal storage redirect for pointer-array pairs (not bound to ClassDB).
+    # Parents redirect a nested pair struct's storage so the deepest owner's
+    # b3_ pointers always stay valid while this instance is alive.
+    for _path, leaf_field, _count in pairs:
+        elem = pair_elem_b3_type(leaf_field)
+        redirect = _pair_redirect_name(_path)
+        lines.append(f"{T}void {redirect}(godot::Vector<{elem}>* p_storage);")
 
     # Getter/setter declarations
     for field, cls in convertible_fields:
@@ -191,13 +252,22 @@ def generate_header(struct: Struct, type_map: dict, all_struct_names: set,
         lines.append(f"{T}mutable {struct.name}* _data_ptr;")
         lines.append(f"{T}Ref<RefCounted> _parent_ref;")
 
+    # Deep storage for pointer-array pairs. The pointer member defaults to the
+    # owned storage and may be redirected when this class is used as a nested
+    # view, so pair data written through the view lands in the parent's storage.
+    for _path, leaf_field, _count in pairs:
+        elem = pair_elem_b3_type(leaf_field)
+        storage = pair_storage_name(_path)
+        lines.append(f"{T}godot::Vector<{elem}> {storage};")
+        lines.append(f"{T}godot::Vector<{elem}>* {storage}_ptr;")
+
     lines.append("};")
 
     return "\n".join(lines) + "\n", warnings
 
 
 def generate_implementation(struct: Struct, type_map: dict, all_struct_names: set,
-                            skip_structs: set, snake: str = "") -> str:
+                            skip_structs: set, snake: str = "", structs: list = None) -> str:
     """Generate implementation file for a data class."""
     cls_name = to_godot_class_name(struct.name)
     T = "\t"
@@ -207,6 +277,7 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
         return ""
 
     is_child = _is_child_struct(struct, type_map, all_struct_names, skip_structs)
+    pairs = pair_paths(struct, type_map, structs) if structs else []
 
     lines = [
         f'#include "box3d_{snake}.gen.hpp"',
@@ -218,7 +289,13 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
 
     # --- Constructor + destructor + set_as_view for child structs ---
     if is_child:
-        lines.append(f"{cls_name}::{cls_name}() : _data_ptr(&b3_) {{")
+        init_parts = ["_data_ptr(&b3_)"]
+        init_parts += [f"{pair_storage_name(path)}_ptr(&{pair_storage_name(path)})" for path, _lf, _c in pairs]
+        init_expr = ", ".join(init_parts)
+        lines.append(f"{cls_name}::{cls_name}() : {init_expr} {{")
+        for path, _leaf_field, count_field in pairs:
+            lines.append(f"{T}_data_ptr->{path} = nullptr;")
+            lines.append(f"{T}_data_ptr->{_count_path(path, count_field)} = 0;")
         lines.append("}")
         lines.append("")
         lines.append(f"{cls_name}::~{cls_name}() {{")
@@ -230,16 +307,64 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
         lines.append("}")
         lines.append("")
 
+    # --- Pair storage redirect helpers ---
+    for _path, leaf_field, _count in pairs:
+        elem = pair_elem_b3_type(leaf_field)
+        storage = pair_storage_name(_path)
+        redirect = _pair_redirect_name(_path)
+        lines.append(f"void {cls_name}::{redirect}(godot::Vector<{elem}>* p_storage) {{")
+        lines.append(f"{T}{storage}_ptr = p_storage;")
+        lines.append("}")
+        lines.append("")
+
     # --- Getters ---
     for field, cls in convertible_fields:
         prop_name = to_snake_case(field.name)
 
         if cls == FieldClassification.ARRAY:
             size = field.array_size
-            base_type = field.type
-            packed = "PackedFloat32Array" if base_type == "float" else "PackedInt32Array"
+            packed = packed_array_type(field.type) or "PackedInt32Array"
             lines.append(f"{packed} {cls_name}::get_{prop_name}() const {{")
             lines.append(f"{T}return _make_packed_array(_data_ptr->{field.name}, {packed}(), (size_t){size});")
+            lines.append("}")
+            lines.append("")
+        elif cls == FieldClassification.POINTER_ARRAY_PAIR:
+            count_field = pair_count_field(struct.name, field.name, type_map) or "count"
+            packed = pair_packed_type(field, type_map)
+            conv = "b3_to_godot" if pair_is_math(field, type_map) else ""
+            lines.append(f"{packed} {cls_name}::get_{prop_name}() const {{")
+            lines.append(f"{T}{packed} result;")
+            lines.append(f"{T}if (_data_ptr->{field.name} && _data_ptr->{count_field} > 0) {{")
+            lines.append(f"{T}{T}result.resize(_data_ptr->{count_field});")
+            lines.append(f"{T}{T}for (int i = 0; i < _data_ptr->{count_field}; i++) {{")
+            if conv:
+                lines.append(f"{T}{T}{T}result.set(i, {conv}(_data_ptr->{field.name}[i]));")
+            else:
+                lines.append(f"{T}{T}{T}result.set(i, _data_ptr->{field.name}[i]);")
+            lines.append(f"{T}{T}}}")
+            lines.append(f"{T}}}")
+            lines.append(f"{T}return result;")
+            lines.append("}")
+            lines.append("")
+        elif cls == FieldClassification.NESTED_PAIR_STRUCT:
+            nested_cls = to_godot_class_name(field.type)
+            godot_type = resolve_field_type(field, cls, type_map)["cpp"]
+            lines.append(f"{godot_type} {cls_name}::get_{prop_name}() const {{")
+            lines.append(f"{T}Ref<{nested_cls}> ref;")
+            lines.append(f"{T}ref.instantiate();")
+            lines.append(
+                f"{T}ref->set_as_view("
+                f"const_cast<{field.type}*>(&_data_ptr->{field.name}),"
+                f" const_cast<{cls_name}*>(this));"
+            )
+            for path, _leaf_field, _count in pairs:
+                if not path.startswith(field.name + "."):
+                    continue
+                child_path = path[len(field.name) + 1:]
+                child_redirect = _pair_redirect_name(child_path)
+                parent_ptr = f"{pair_storage_name(path)}_ptr"
+                lines.append(f"{T}ref->{child_redirect}({parent_ptr});")
+            lines.append(f"{T}return ref;")
             lines.append("}")
             lines.append("")
         elif cls == FieldClassification.NESTED_STRUCT:
@@ -272,10 +397,59 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
 
         if cls == FieldClassification.ARRAY:
             size = field.array_size
-            base_type = field.type
-            packed = "PackedFloat32Array" if base_type == "float" else "PackedInt32Array"
+            packed = packed_array_type(field.type) or "PackedInt32Array"
             lines.append(f"void {cls_name}::set_{prop_name}({packed} {param}) {{")
             lines.append(f"{T}_unpack_array({param}, _data_ptr->{field.name}, {size});")
+            lines.append("}")
+            lines.append("")
+        elif cls == FieldClassification.POINTER_ARRAY_PAIR:
+            count_field = pair_count_field(struct.name, field.name, type_map) or "count"
+            packed = pair_packed_type(field, type_map)
+            elem = pair_elem_b3_type(field)
+            storage = pair_storage_name(field.name)
+            conv = "godot_to_b3" if pair_is_math(field, type_map) else ""
+            lines.append(f"void {cls_name}::set_{prop_name}({packed} {param}) {{")
+            lines.append(f"{T}int n = {param}.size();")
+            lines.append(f"{T}godot::Vector<{elem}> tmp;")
+            lines.append(f"{T}tmp.resize(n);")
+            lines.append(f"{T}for (int i = 0; i < n; i++) {{")
+            if conv:
+                lines.append(f"{T}{T}tmp.ptrw()[i] = {conv}({param}[i]);")
+            else:
+                lines.append(f"{T}{T}tmp.ptrw()[i] = {param}[i];")
+            lines.append(f"{T}}}")
+            lines.append(f"{T}*{storage}_ptr = tmp;")
+            lines.append(f"{T}_data_ptr->{field.name} = {storage}_ptr->size() > 0 ? {storage}_ptr->ptrw() : nullptr;")
+            lines.append(f"{T}_data_ptr->{count_field} = n;")
+            lines.append("}")
+            lines.append("")
+        elif cls == FieldClassification.NESTED_PAIR_STRUCT:
+            nested_cls = to_godot_class_name(field.type)
+            lines.append(f"void {cls_name}::set_{prop_name}({godot_type} {param}) {{")
+            lines.append(f"{T}if ({param}.is_valid()) {{")
+            lines.append(f"{T}{T}const {field.type}* src = {param}->ptr();")
+            field_pairs = [(path, leaf_field, count_field) for path, leaf_field, count_field in pairs if path.startswith(field.name + ".")]
+            for _path, leaf_field, _count in field_pairs:
+                child_leaf = _path.split(".")[-1]
+                child_count = _count
+                elem = pair_elem_b3_type(leaf_field)
+                storage = f"{pair_storage_name(_path)}_ptr"
+                lines.append(f"{T}{T}godot::Vector<{elem}> tmp;")
+                lines.append(f"{T}{T}if (src->{child_leaf} && src->{child_count} > 0) {{")
+                lines.append(f"{T}{T}{T}tmp.resize(src->{child_count});")
+                lines.append(f"{T}{T}{T}for (int i = 0; i < src->{child_count}; i++) {{")
+                lines.append(f"{T}{T}{T}{T}tmp.ptrw()[i] = src->{child_leaf}[i];")
+                lines.append(f"{T}{T}{T}}}")
+                lines.append(f"{T}{T}}}")
+                lines.append(f"{T}{T}*{storage} = tmp;")
+            lines.append(f"{T}{T}_data_ptr->{field.name} = *src;")
+            for _path, leaf_field, _count in field_pairs:
+                child_leaf = _path.split(".")[-1]
+                child_count = _count
+                storage = f"{pair_storage_name(_path)}_ptr"
+                lines.append(f"{T}{T}_data_ptr->{field.name}.{child_leaf} = {storage}->size() > 0 ? {storage}->ptrw() : nullptr;")
+                lines.append(f"{T}{T}_data_ptr->{field.name}.{child_count} = (int){storage}->size();")
+            lines.append(f"{T}}}")
             lines.append("}")
             lines.append("")
         elif cls == FieldClassification.NESTED_STRUCT:
@@ -302,6 +476,22 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
     # --- from_b3() ---
     lines.append(f"void {cls_name}::from_b3(const {struct.name}& p_data) {{")
     lines.append(f"{T}*_data_ptr = p_data;")
+    for _path, _leaf_field, count_field in pairs:
+        elem = pair_elem_b3_type(_leaf_field)
+        storage = f"{pair_storage_name(_path)}_ptr"
+        count_path = _count_path(_path, count_field)
+        lines.append(f"{T}if (p_data.{_path} && p_data.{count_path} > 0) {{")
+        lines.append(f"{T}{T}godot::Vector<{elem}> tmp;")
+        lines.append(f"{T}{T}tmp.resize(p_data.{count_path});")
+        lines.append(f"{T}{T}for (int i = 0; i < p_data.{count_path}; i++) {{")
+        lines.append(f"{T}{T}{T}tmp.ptrw()[i] = p_data.{_path}[i];")
+        lines.append(f"{T}{T}}}")
+        lines.append(f"{T}{T}*{storage} = tmp;")
+        lines.append(f"{T}}} else {{")
+        lines.append(f"{T}{T}*{storage} = godot::Vector<{elem}>();")
+        lines.append(f"{T}}}")
+        lines.append(f"{T}_data_ptr->{_path} = {storage}->size() > 0 ? {storage}->ptrw() : nullptr;")
+        lines.append(f"{T}_data_ptr->{count_path} = (int){storage}->size();")
     lines.append("}")
     lines.append("")
 
@@ -354,7 +544,7 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
 
         # For Ref<T> types, we need the class name string
         # godot-cpp ADD_PROPERTY signature: (property_info, setter, getter)
-        if cls == FieldClassification.NESTED_STRUCT:
+        if cls in (FieldClassification.NESTED_STRUCT, FieldClassification.NESTED_PAIR_STRUCT):
             nested_cls = to_godot_class_name(field.type)
             lines.append(
                 f'{T}ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "{prop_name}", PROPERTY_HINT_NONE, '
@@ -375,8 +565,7 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
 def _blob_field_type(field, cls, type_map: dict) -> str:
     """C++ type for a blob class field accessor."""
     if cls == FieldClassification.ARRAY:
-        base = field.type
-        return "PackedFloat32Array" if base == "float" else "PackedInt32Array"
+        return packed_array_type(field.type) or "PackedInt32Array"
     if cls == FieldClassification.ENUM:
         return field.type
     return to_godot_type(field.type, type_map, qualified=False)
@@ -492,8 +681,7 @@ def generate_blob_implementation(struct: Struct, type_map: dict, all_struct_name
 
         if cls == FieldClassification.ARRAY:
             size = field.array_size
-            base = field.type
-            packed = "PackedFloat32Array" if base == "float" else "PackedInt32Array"
+            packed = packed_array_type(field.type) or "PackedInt32Array"
             lines.append(f"{packed} {cls_name}::get_{prop_name}() const {{")
             lines.append(f"{T}return _make_packed_array(_data_ptr->{field.name}, {packed}(), (size_t){size});")
             lines.append("}")
@@ -602,7 +790,7 @@ def generate_data_classes(root: str) -> tuple[int, list[str]]:
         snake = data_class_filename(struct.name)
 
         header_content, warns = generate_header(
-            struct, type_map, all_struct_names, eff_skip
+            struct, type_map, all_struct_names, eff_skip, data["structs"]
         )
         all_warnings.extend(warns)
 
@@ -610,7 +798,7 @@ def generate_data_classes(root: str) -> tuple[int, list[str]]:
             continue
 
         impl_content = generate_implementation(
-            struct, type_map, all_struct_names, eff_skip, snake
+            struct, type_map, all_struct_names, eff_skip, snake, data["structs"]
         )
 
         # Write header

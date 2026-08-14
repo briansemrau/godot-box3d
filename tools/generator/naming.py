@@ -7,6 +7,52 @@ counterparts.
 
 import re
 
+# Canonical C scalar type → Godot Packed*Array mapping. Used for C-style array
+# parameters, pointer-array fields, and fixed-size scalar struct arrays. Kept in
+# naming.py because it is dependency-free (struct_model and type_conversions both
+# import it without creating a cycle).
+SCALAR_PACKED_ARRAYS = {
+    "int8_t": "PackedByteArray",
+    "uint8_t": "PackedByteArray",
+    "int16_t": "PackedInt32Array",
+    "uint16_t": "PackedInt32Array",
+    "int": "PackedInt32Array",
+    "int32_t": "PackedInt32Array",
+    "uint32_t": "PackedInt32Array",
+    "int64_t": "PackedInt64Array",
+    "uint64_t": "PackedInt64Array",
+    "size_t": "PackedInt64Array",
+    "float": "PackedFloat32Array",
+    "double": "PackedFloat64Array",
+}
+
+# Variant::TYPE constant for each Godot Packed*Array type.
+PACKED_ARRAY_VARIANTS = {
+    "PackedByteArray": "Variant::PACKED_BYTE_ARRAY",
+    "PackedInt32Array": "Variant::PACKED_INT32_ARRAY",
+    "PackedInt64Array": "Variant::PACKED_INT64_ARRAY",
+    "PackedFloat32Array": "Variant::PACKED_FLOAT32_ARRAY",
+    "PackedFloat64Array": "Variant::PACKED_FLOAT64_ARRAY",
+    "PackedVector2Array": "Variant::PACKED_VECTOR2_ARRAY",
+    "PackedVector3Array": "Variant::PACKED_VECTOR3_ARRAY",
+    "PackedVector4Array": "Variant::PACKED_VECTOR4_ARRAY",
+    "PackedColorArray": "Variant::PACKED_COLOR_ARRAY",
+}
+
+
+def packed_array_type(scalar_type: str) -> str | None:
+    """Return the Godot Packed*Array type for a C scalar element type, or None.
+
+    Accepts decorated type strings ("const uint8_t*") and strips decoration.
+    """
+    t = scalar_type.replace("const ", "").replace("*", "").strip()
+    return SCALAR_PACKED_ARRAYS.get(t)
+
+
+def packed_array_variant(packed_type: str) -> str:
+    """Return the Variant::TYPE constant for a Godot Packed*Array type."""
+    return PACKED_ARRAY_VARIANTS.get(packed_type, "Variant::NIL")
+
 
 def to_snake_case(name: str) -> str:
     """Convert camelCase or PascalCase to snake_case."""
