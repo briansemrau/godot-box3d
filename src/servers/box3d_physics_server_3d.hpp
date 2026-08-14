@@ -67,7 +67,6 @@ public:
 
 	// --- Space ---
 	RID _space_create() override;
-
 	RID space_create(bool p_with_default_area);
 	void _space_set_active(const RID& p_space, bool p_active) override;
 	bool _space_is_active(const RID& p_space) const override;

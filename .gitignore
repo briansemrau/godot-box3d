@@ -2,12 +2,12 @@ build/
 .fetchcontent-cache/
 bin/
 test_project/.godot/
+/test_project/Build
+/build-win
+/benchmark-video
 .cache/
 __pycache__/
 src/bindings/
 doc_classes/
-/test_project/Build
-/build-win
-/benchmark-video
 .DS_Store
 .venv/
