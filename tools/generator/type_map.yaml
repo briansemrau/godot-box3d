@@ -149,6 +149,7 @@ skip_functions:
   - b3Sleep
   - b3Hash
   - b3InternalAssert
+  - b3World_DumpShapeBounds
 
 # Hand-written functions: intentionally NOT auto-generated because a human
 # implements them in src/api/. The audit verifies each has a matching
