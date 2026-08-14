@@ -134,6 +134,7 @@ def generate_class_xml(functions: list[Function], type_map: dict) -> str:
     lines.append('\t</brief_description>')
     lines.append('\t<description>')
     lines.append('\t\tStatic API class that exposes the full Box3D C API directly to Godot.')
+    lines.append('\t\tFor complete documentation, see [the Box3D documentation](https://box2d.org/documentation3d/).')
     lines.append('\t\tShares the same RID space as Box3DPhysicsServer3D so objects created by either layer are accessible from both.')
     lines.append('\t</description>')
     lines.append('\t<methods>')

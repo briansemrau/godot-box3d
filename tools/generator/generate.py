@@ -51,7 +51,7 @@ def main():
 
         results = audit(str(root))
         print_report(results)
-        if results["missing"] and args.action == "audit":
+        if (results["missing"] or results["handwritten_missing"]) and args.action == "audit":
             sys.exit(1)
 
     if args.action in ("all", "stubs"):

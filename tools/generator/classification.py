@@ -88,6 +88,7 @@ class FuncVerdict:
     decision: str
     reason: str = ""
     configured: bool = True
+    handwritten: bool = False
     array_params: dict = field(default_factory=dict)
 
 
@@ -124,6 +125,7 @@ def classify_function(func, data: dict, type_map: dict) -> FuncVerdict:
     domain = classify_domain(func.name)
     godot_name = to_godot_name(func.name)
     skip_functions = set(type_map.get("skip_functions", []))
+    handwritten_functions = set(type_map.get("handwritten_functions", []))
     skip_types = set(type_map.get("skip_types", []))
     skip_structs = set(type_map.get("skip_structs", []))
     blobs = blob_structs(data)
@@ -135,13 +137,19 @@ def classify_function(func, data: dict, type_map: dict) -> FuncVerdict:
     for p in func.params:
         p.array_info = detected.get(p.name)
 
-    def _skip(reason: str, configured: bool = True) -> FuncVerdict:
+    def _skip(reason: str, configured: bool = True, handwritten: bool = False) -> FuncVerdict:
         return FuncVerdict(func, domain, godot_name, SKIP, reason=reason,
-                           configured=configured, array_params=detected)
+                           configured=configured, handwritten=handwritten,
+                           array_params=detected)
 
     # Explicit function skip — the only place "never want in API" lives.
     if func.name in skip_functions:
         return _skip(f"explicit skip_functions entry")
+
+    # Hand-written implementation — deliberately not auto-generated, but a
+    # human implementation in src/api/ is expected (audit verifies it exists).
+    if func.name in handwritten_functions:
+        return _skip(f"handwritten implementation (configured)", handwritten=True)
 
     # Parameters.
     for p in func.params:

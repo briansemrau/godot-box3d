@@ -72,7 +72,11 @@ math_types:
 # enums: populated automatically by stubs.py from parsed headers.
 
 # Enum blacklist — types parsed as enums but should NOT map to int
-skip_enums: []
+skip_enums:
+  # Debug-draw enums — only used by the skipped debug-draw functions
+  # (b3World_Draw, b3GetGraphColor, b3DefaultDebugDraw). See SCOPE_REVIEW.md group 8.
+  - b3HexColor
+  - b3DebugMaterial
 
 # Skip list: types that can't be converted to Godot
 skip_types:
@@ -104,34 +108,11 @@ skip_types:
   - b3Recording
   - b3RecPlayer
   - b3DebugDraw
-  - b3Sweep
 
-# Skip list: functions that can't be auto-generated (need manual implementation)
+# Skip list: functions that can't be auto-generated and will never be bound.
+# These are deliberate policy rejects (out of scope) — NOT things that are
+# hand-written elsewhere. Hand-written functions belong in `handwritten_functions`.
 skip_functions:
-  # Creation (need RID + def struct conversion)
-  - b3CreateWorld
-  - b3CreateBody
-  - b3CreateSphereShape
-  - b3CreateCapsuleShape
-  - b3CreateHullShape
-  - b3CreateTransformedHullShape
-  - b3CreateMeshShape
-  - b3CreateHeightfieldShape
-  - b3CreateCompoundShape
-  - b3CreateParallelJoint
-  - b3CreateDistanceJoint
-  - b3CreateFilterJoint
-  - b3CreateMotorJoint
-  - b3CreatePrismaticJoint
-  - b3CreateRevoluteJoint
-  - b3CreateSphericalJoint
-  - b3CreateWeldJoint
-  - b3CreateWheelJoint
-  # Destruction (need RID cleanup)
-  - b3DestroyWorld
-  - b3DestroyBody
-  - b3DestroyShape
-  - b3DestroyJoint
   # Blob data lifetime is owned by the generated Box3D*Data RefCounted classes
   # (their destructors free the heap blob). A standalone destroy would risk a
   # double free when the wrapper is released. Never exposed.
@@ -139,76 +120,20 @@ skip_functions:
   - b3DestroyMesh
   - b3DestroyCompound
   - b3DestroyHeightField
-  # Callbacks (need trampolines)
-  - b3World_SetCustomFilterCallback
-  - b3World_SetPreSolveCallback
+  # Friction/restitution callbacks — out of scope: invoked per-contact per-solve on
+  # the solver hot path (must be trivial C by Box3D docs), and with workerCount > 1
+  # they fire on physics worker threads where a synchronous Callable return isn't
+  # thread-safe. See API_BINDING_SPEC.md "Callbacks via trampoline" / SCOPE_REVIEW.md group 2.
   - b3World_SetFrictionCallback
   - b3World_SetRestitutionCallback
-  # Query functions with callbacks
-  - b3World_OverlapAABB
-  - b3World_OverlapShape
-  - b3World_CastRay
-  - b3World_CastShape
-  - b3World_CastMover
-  - b3World_CollideMover
-  # Event iteration
-  - b3World_GetBodyEvents
-  - b3World_GetSensorEvents
-  - b3World_GetContactEvents
-  - b3World_GetJointEvents
-  # User data (need Variant boxing)
-  - b3Shape_SetUserData
-  - b3Shape_GetUserData
-  # Functions returning ID types (need RID lookup from b3 ID)
-  - b3Body_GetWorld
-  - b3Shape_GetBody
-  - b3Shape_GetWorld
-  - b3Joint_GetBodyA
-  - b3Joint_GetBodyB
-  - b3Joint_GetWorld
-  # Complex mover functions
-  - b3Body_CastShape
-  - b3Body_OverlapShape
-  - b3Body_CollideMover
-  # Recording (opaque pointer types)
-  - b3CreateRecording
-  - b3DestroyRecording
-  - b3Recording_GetData
-  - b3Recording_GetSize
-  - b3ValidateReplay
-  - b3RecPlayer_Create
-  - b3RecPlayer_Destroy
-  - b3RecPlayer_StepFrame
-  - b3RecPlayer_Restart
-  - b3RecPlayer_SeekFrame
-  - b3RecPlayer_GetWorldId
-  - b3RecPlayer_GetFrame
-  - b3RecPlayer_GetFrameCount
-  - b3RecPlayer_IsAtEnd
-  - b3RecPlayer_HasDiverged
-  - b3RecPlayer_GetInfo
-  - b3RecPlayer_GetDivergeFrame
-  - b3RecPlayer_SetWorkerCount
-  - b3RecPlayer_SetKeyframePolicy
-  - b3RecPlayer_GetKeyframeBudget
-  - b3RecPlayer_GetKeyframeBytes
-  - b3RecPlayer_GetKeyframeInterval
-  - b3RecPlayer_GetKeyframeMinInterval
-  - b3RecPlayer_GetBodyCount
-  - b3RecPlayer_GetBodyId
-  - b3RecPlayer_SetDebugShapeCallbacks
-  - b3RecPlayer_DrawFrameQueries
-  - b3RecPlayer_GetFrameQueryCount
-  - b3RecPlayer_GetFrameQuery
-  - b3RecPlayer_GetFrameQueryHit
-  - b3World_StartRecording
-  - b3World_StopRecording
-  # Debug draw / internal
+  # Recording/replay is IN SCOPE (low priority) but not hand-written — it needs the
+  # opaque b3Recording/b3RecPlayer handles modeled (wrapper support), then most of it
+  # auto-generates. Removing it here surfaces those functions as implicit skips/missing
+  # in the audit until the handle modeling lands. See SCOPE_REVIEW.md group 7.
+  # Debug draw — out of scope. The world_dump_* functions auto-generate cleanly and
+  # are kept (see SCOPE_REVIEW.md group 8); only the ones that need a b3DebugDraw
+  # sink or return debug-draw data stay skipped.
   - b3World_Draw
-  - b3World_DumpMemoryStats
-  - b3World_DumpShapeBounds
-  - b3World_DumpAwake
-  - b3World_Dump
   - b3DefaultDebugDraw
   - b3GetGraphColor
   # Allocator/assert/log
@@ -224,12 +149,81 @@ skip_functions:
   - b3Sleep
   - b3Hash
   - b3InternalAssert
-  # Single-element output pointers (hand-written)
+
+# Hand-written functions: intentionally NOT auto-generated because a human
+# implements them in src/api/. The audit verifies each has a matching
+# declaration in src/api/*.hpp; entries without one are reported as
+# `handwritten_missing` (this is what surfaces the missing creation/callback/
+# event layer). Never auto-generate these — they need RID lookup, def-struct
+# conversion, Variant boxing, or trampolines.
+handwritten_functions:
+  # Creation (need RID + def struct conversion)
+  - b3CreateWorld
+  - b3CreateBody
+  - b3CreateSphereShape
+  - b3CreateCapsuleShape
+  - b3CreateHullShape
+  - b3CreateTransformedHullShape
+  - b3CreateMeshShape
+  - b3CreateHeightFieldShape
+  - b3CreateCompoundShape
+  - b3CreateParallelJoint
+  - b3CreateDistanceJoint
+  - b3CreateFilterJoint
+  - b3CreateMotorJoint
+  - b3CreatePrismaticJoint
+  - b3CreateRevoluteJoint
+  - b3CreateSphericalJoint
+  - b3CreateWeldJoint
+  - b3CreateWheelJoint
+  # Destruction (need RID cleanup)
+  - b3DestroyWorld
+  - b3DestroyBody
+  - b3DestroyShape
+  - b3DestroyJoint
+  # Callbacks (need trampolines — wiring is remaining work)
+  - b3World_SetCustomFilterCallback
+  - b3World_SetPreSolveCallback
+  # Query functions with callbacks
+  - b3World_OverlapAABB
+  - b3World_OverlapShape
+  - b3World_CastRay
+  - b3World_CastShape
+  - b3World_CastMover
+  - b3World_CollideMover
+  # Event iteration
+  - b3World_GetBodyEvents
+  - b3World_GetSensorEvents
+  - b3World_GetContactEvents
+  - b3World_GetJointEvents
+  # User data (need Variant boxing)
+  - b3Shape_SetUserData
+  - b3Shape_GetUserData
+  - b3World_SetUserData
+  - b3World_GetUserData
+  - b3Body_SetUserData
+  - b3Body_GetUserData
+  - b3Joint_SetUserData
+  - b3Joint_GetUserData
+  # Functions returning ID types (need RID lookup from b3 ID)
+  - b3Body_GetWorld
+  - b3Shape_GetBody
+  - b3Shape_GetWorld
+  - b3Joint_GetBodyA
+  - b3Joint_GetBodyB
+  - b3Joint_GetWorld
+  # Complex mover functions
+  - b3Body_CastShape
+  - b3Body_OverlapShape
+  - b3Body_CollideMover
+  # Single-element output pointers
   - b3Joint_GetConstraintTuning
   - b3DistanceJoint_GetSpringForceRange
   - b3Body_GetClosestPoint
-  # INOUT array (hand-written)
+  # INOUT array
   - b3SolvePlanes
+  # Output scalar pointer (implemented as get_milliseconds_and_reset)
+  - b3GetMillisecondsAndReset
 
 # Array params: overrides for auto-detected array parameters.
 # Most functions are auto-detected. Only entries needing overrides are listed here.
@@ -358,8 +352,6 @@ skip_structs:
   - b3ShapeProxy
   # Collision internals with complex array patterns
   - b3Simplex
-  - b3GjkCache
-  - b3ContactCache
   - b3Manifold
   # Debug/rendering
   - b3DebugShape
@@ -376,7 +368,6 @@ skip_structs:
   - b3ContactEndTouchEvent
   - b3ContactHitEvent
   - b3JointEvent
-  - b3BodyCastResult
   - b3BodyPlaneResult
   # Dynamic tree internals
   - b3TreeNode

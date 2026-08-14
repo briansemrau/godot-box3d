@@ -51,6 +51,16 @@ Output: `bin/libgodot-box3d.{so,dynlib,dll}`
 Parses the Box3D headers and reports coverage: bound / skipped / missing, per
 domain, plus any *implicit* skips (structural skips with no `type_map.yaml` entry)
 that need a human decision. Exits with error code 1 if any functions are missing.
+It also verifies:
+- **Hand-written coverage** — every function listed in `handwritten_functions`
+  must have a matching declaration in `src/api/*.hpp`; missing ones are reported
+  and count toward the failure exit code.
+- **Config drift** — entries in the config lists are checked against the parsed
+  headers so an upstream rename (e.g. `b3CreateHeightfieldShape` →
+  `b3CreateHeightFieldShape`) can never silently stop matching again.
+- **Unused types** — generated data classes and bound enums that no bound or
+  hand-written function (transitively) references — the checklist for scope
+  trimming.
 
 ### `stubs`
 Parses the Box3D headers → generates `Box3DAPI` static method stubs →
@@ -75,10 +85,14 @@ All configuration is in `type_map.yaml`:
 
 - `skip_structs` — structs that should NOT get data classes (opaque handles,
   event iteration types, collision internals)
-- `skip_functions` — functions that should NOT get auto-generated stubs
-  (creation/destruction, callbacks, recording, complex methods — usually because
-  they have hand-written implementations)
-- `skip_enums` — enums that should NOT map to `int` (currently empty)
+- `skip_functions` — functions that are deliberately OUT OF SCOPE and will never
+  be bound (debug draw, allocator, OS helpers). This is a policy list,
+  NOT for functions with hand-written implementations.
+- `handwritten_functions` — functions that are intentionally NOT auto-generated
+  because a human implements them in `src/api/` (creation/destruction, callbacks,
+  events, ID lookups, user data, query-with-callback functions). The audit
+  verifies each has a declaration in `src/api/*.hpp`.
+- `skip_enums` — enums that should NOT map to `int` (debug-draw enums)
 - `skip_types` — parameter types that make a function unbindable (callback
   function-pointer types, opaque handles)
 - `id_types` — Box3D ID types and their RID/pack mappings
@@ -105,8 +119,9 @@ For functions that can't be auto-generated (output pointers, user data, complex 
 1. Add the declaration to `src/api/box3d_api.hpp`
 2. Add the implementation to `src/api/box3d_api.cpp` (or a sibling, e.g. `box3d_api_collision.cpp`)
 3. Add the `ClassDB::bind_static_method()` call in `Box3DAPI::_bind_methods()`
-4. Keep the function in `skip_functions` in `type_map.yaml` so the generator and
-   audit know it's intentionally not auto-generated
+4. Add the b3 function name to `handwritten_functions` in `type_map.yaml` so the
+   generator never auto-generates it and the audit verifies your implementation
+   exists (it reports a failure until the declaration is present)
 
 ## Architecture
 

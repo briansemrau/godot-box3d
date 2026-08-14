@@ -459,7 +459,7 @@ DEFAULT_HEADERS = [
 def parse_headers(root: str, headers: list[str] | None = None) -> dict:
     """Parse Box3D headers and return all extracted data.
     
-    Returns dict with keys: functions, structs, enums
+    Returns dict with keys: functions, structs, enums, header_source
     """
     if headers is None:
         headers = DEFAULT_HEADERS
@@ -467,6 +467,7 @@ def parse_headers(root: str, headers: list[str] | None = None) -> dict:
     all_functions = []
     all_structs = []
     all_enums = []
+    header_source = ""
 
     for header_path in headers:
         path = Path(root) / header_path
@@ -477,11 +478,13 @@ def parse_headers(root: str, headers: list[str] | None = None) -> dict:
         all_functions.extend(parse_functions(text, header=hdr_name))
         all_structs.extend(parse_structs(text, header=hdr_name))
         all_enums.extend(parse_enums(text, header=hdr_name))
+        header_source += f"\n/* {hdr_name} */\n" + text
 
     return {
         "functions": all_functions,
         "structs": all_structs,
         "enums": all_enums,
+        "header_source": header_source,
     }
 
 
