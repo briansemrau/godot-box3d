@@ -16,6 +16,22 @@ The structure of this extension is based on [godot-jolt](https://github.com/godo
 - Joints: pin, hinge, and slider
 - A small test project (`test_project/`) with demo and stress scenes
 
+## Direct API & code generator
+
+Beyond the `PhysicsServer3D` integration, the repo exposes the full Box3D C API
+directly to GDScript through the static `Box3DAPI` class. It shares the same RID
+space as the server, so objects created by either layer are interchangeable. The
+bindings are generated from the Box3D headers to ease upstream maintenance:
+
+```sh
+tools/generator/setup.sh                                                        # one-time venv setup
+tools/generator/.venv/bin/python tools/generator/generate.py all                # regenerate bindings + docs
+tools/generator/.venv/bin/python tools/generator/generate.py audit              # coverage report (exit 1 on gaps)
+```
+
+Generated output lives in `src/bindings/` and `doc_classes/` (gitignored). See
+`tools/API_BINDING_SPEC.md` for the architecture and current status.
+
 ## What's left to do
 
 - Cylinder and separation ray shapes (not supported by Box3D)

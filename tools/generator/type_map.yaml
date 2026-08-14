@@ -1,0 +1,385 @@
+# Type map for Box3D → Godot conversions.
+# Only entries that need special handling. Scalars (int, float, bool, uint*_t, size_t)
+# convert directly. Unknown types are passed through as-is.
+
+# ID types that map to RID with owner metadata
+id_types:
+  b3WorldId:
+    godot: RID
+    owner: space_owner
+    impl: Box3DSpace3D
+    id_field: get_world_id()
+    pack: b3StoreWorldId
+    unpack: b3LoadWorldId
+  b3BodyId:
+    godot: RID
+    owner: body_owner
+    impl: Box3DBodyImpl3D
+    id_field: get_body_id()
+    pack: b3StoreBodyId
+    unpack: b3LoadBodyId
+  b3JointId:
+    godot: RID
+    owner: joint_owner
+    impl: Box3DJointImpl3D
+    id_field: get_joint_id()
+    pack: b3StoreJointId
+    unpack: b3LoadJointId
+
+# Non-RID ID types
+  b3ShapeId:
+    godot: uint64_t
+    pack: b3StoreShapeId
+    unpack: b3LoadShapeId
+
+# Math types with conversion functions
+math_types:
+  b3Vec3:
+    godot: Vector3
+    to_godot: b3_to_godot
+    to_b3: godot_to_b3
+  b3Pos:
+    godot: Vector3
+    to_godot: b3_to_godot
+    to_b3: godot_to_b3
+  b3Quat:
+    godot: Quaternion
+    to_godot: b3_to_godot
+    to_b3: godot_to_b3
+  b3Transform:
+    godot: Transform3D
+    to_godot: b3_to_godot
+    to_b3: godot_to_b3_transform
+  b3WorldTransform:
+    godot: Transform3D
+    to_godot: b3_to_godot
+    to_b3: godot_to_b3_transform
+  b3AABB:
+    godot: AABB
+    to_godot: b3_to_godot
+    to_b3: godot_to_b3
+  b3Plane:
+    godot: Plane
+    to_godot: b3_to_godot
+    to_b3: godot_to_b3
+  b3Matrix3:
+    godot: Basis
+    to_godot: b3_to_godot
+    to_b3: godot_to_b3
+
+# Enum types (map to int) — auto-detected from headers.
+# Use skip_enums to exclude any that shouldn't be treated as int.
+# enums: populated automatically by stubs.py from parsed headers.
+
+# Enum blacklist — types parsed as enums but should NOT map to int
+skip_enums: []
+
+# Skip list: types that can't be converted to Godot
+skip_types:
+  - b3AllocFcn
+  - b3FreeFcn
+  - b3AssertFcn
+  - b3LogFcn
+  - b3TaskCallback
+  - b3EnqueueTaskCallback
+  - b3FinishTaskCallback
+  - b3FrictionCallback
+  - b3RestitutionCallback
+  - b3CustomFilterFcn
+  - b3PreSolveFcn
+  - b3OverlapResultFcn
+  - b3CastResultFcn
+  - b3MoverFilterFcn
+  - b3PlaneResultFcn
+  - b3CreateDebugShapeCallback
+  - b3DestroyDebugShapeCallback
+  - b3TreeQueryCallbackFcn
+  - b3TreeQueryClosestCallbackFcn
+  - b3TreeRayCastCallbackFcn
+  - b3TreeBoxCastCallbackFcn
+  - b3CompoundQueryFcn
+  - b3MeshQueryFcn
+  # Opaque handles (pointer params, not arrays)
+  - b3DynamicTree
+  - b3Recording
+  - b3RecPlayer
+  - b3DebugDraw
+  - b3Sweep
+
+# Skip list: functions that can't be auto-generated (need manual implementation)
+skip_functions:
+  # Creation (need RID + def struct conversion)
+  - b3CreateWorld
+  - b3CreateBody
+  - b3CreateSphereShape
+  - b3CreateCapsuleShape
+  - b3CreateHullShape
+  - b3CreateTransformedHullShape
+  - b3CreateMeshShape
+  - b3CreateHeightfieldShape
+  - b3CreateCompoundShape
+  - b3CreateParallelJoint
+  - b3CreateDistanceJoint
+  - b3CreateFilterJoint
+  - b3CreateMotorJoint
+  - b3CreatePrismaticJoint
+  - b3CreateRevoluteJoint
+  - b3CreateSphericalJoint
+  - b3CreateWeldJoint
+  - b3CreateWheelJoint
+  # Destruction (need RID cleanup)
+  - b3DestroyWorld
+  - b3DestroyBody
+  - b3DestroyShape
+  - b3DestroyJoint
+  # Blob data lifetime is owned by the generated Box3D*Data RefCounted classes
+  # (their destructors free the heap blob). A standalone destroy would risk a
+  # double free when the wrapper is released. Never exposed.
+  - b3DestroyHull
+  - b3DestroyMesh
+  - b3DestroyCompound
+  - b3DestroyHeightField
+  # Callbacks (need trampolines)
+  - b3World_SetCustomFilterCallback
+  - b3World_SetPreSolveCallback
+  - b3World_SetFrictionCallback
+  - b3World_SetRestitutionCallback
+  # Query functions with callbacks
+  - b3World_OverlapAABB
+  - b3World_OverlapShape
+  - b3World_CastRay
+  - b3World_CastShape
+  - b3World_CastMover
+  - b3World_CollideMover
+  # Event iteration
+  - b3World_GetBodyEvents
+  - b3World_GetSensorEvents
+  - b3World_GetContactEvents
+  - b3World_GetJointEvents
+  # User data (need Variant boxing)
+  - b3Shape_SetUserData
+  - b3Shape_GetUserData
+  # Functions returning ID types (need RID lookup from b3 ID)
+  - b3Body_GetWorld
+  - b3Shape_GetBody
+  - b3Shape_GetWorld
+  - b3Joint_GetBodyA
+  - b3Joint_GetBodyB
+  - b3Joint_GetWorld
+  # Complex mover functions
+  - b3Body_CastShape
+  - b3Body_OverlapShape
+  - b3Body_CollideMover
+  # Recording (opaque pointer types)
+  - b3CreateRecording
+  - b3DestroyRecording
+  - b3Recording_GetData
+  - b3Recording_GetSize
+  - b3ValidateReplay
+  - b3RecPlayer_Create
+  - b3RecPlayer_Destroy
+  - b3RecPlayer_StepFrame
+  - b3RecPlayer_Restart
+  - b3RecPlayer_SeekFrame
+  - b3RecPlayer_GetWorldId
+  - b3RecPlayer_GetFrame
+  - b3RecPlayer_GetFrameCount
+  - b3RecPlayer_IsAtEnd
+  - b3RecPlayer_HasDiverged
+  - b3RecPlayer_GetInfo
+  - b3RecPlayer_GetDivergeFrame
+  - b3RecPlayer_SetWorkerCount
+  - b3RecPlayer_SetKeyframePolicy
+  - b3RecPlayer_GetKeyframeBudget
+  - b3RecPlayer_GetKeyframeBytes
+  - b3RecPlayer_GetKeyframeInterval
+  - b3RecPlayer_GetKeyframeMinInterval
+  - b3RecPlayer_GetBodyCount
+  - b3RecPlayer_GetBodyId
+  - b3RecPlayer_SetDebugShapeCallbacks
+  - b3RecPlayer_DrawFrameQueries
+  - b3RecPlayer_GetFrameQueryCount
+  - b3RecPlayer_GetFrameQuery
+  - b3RecPlayer_GetFrameQueryHit
+  - b3World_StartRecording
+  - b3World_StopRecording
+  # Debug draw / internal
+  - b3World_Draw
+  - b3World_DumpMemoryStats
+  - b3World_DumpShapeBounds
+  - b3World_DumpAwake
+  - b3World_Dump
+  - b3DefaultDebugDraw
+  - b3GetGraphColor
+  # Allocator/assert/log
+  - b3SetAllocator
+  - b3SetAssertFcn
+  - b3SetLogFcn
+  # Trivial/basic helpers not worth exposing through the binding layer
+  # (also declared twice in the C headers, which would duplicate the stub)
+  - b3IsValidFloat
+  - b3DynamicTree_Validate
+  # OS-specific / internal
+  - b3Yield
+  - b3Sleep
+  - b3Hash
+  - b3InternalAssert
+  # Single-element output pointers (hand-written)
+  - b3Joint_GetConstraintTuning
+  - b3DistanceJoint_GetSpringForceRange
+  - b3Body_GetClosestPoint
+  # INOUT array (hand-written)
+  - b3SolvePlanes
+
+# Array params: overrides for auto-detected array parameters.
+# Most functions are auto-detected. Only entries needing overrides are listed here.
+array_params:
+  b3Body_GetContactData:
+    contactData:
+      count_function: b3Body_GetContactCapacity
+  b3Shape_GetContactData:
+    contactData:
+      count_function: b3Shape_GetContactCapacity
+  b3Shape_GetSensorData:
+    visitorIds:
+      count_function: b3Shape_GetSensorCapacity
+  # Collision primitives - output struct with internal array
+  b3CollideSpheres:
+    manifold:
+      direction: output
+      count_param: capacity
+      output_struct:
+        type: b3LocalManifold
+        array_field: points
+        count_field: pointCount
+        return_element: Box3DLocalManifoldPoint
+        default_capacity: 4
+  b3CollideCapsules:
+    manifold:
+      direction: output
+      count_param: capacity
+      output_struct:
+        type: b3LocalManifold
+        array_field: points
+        count_field: pointCount
+        return_element: Box3DLocalManifoldPoint
+        default_capacity: 4
+  b3CollideHulls:
+    manifold:
+      direction: output
+      count_param: capacity
+      output_struct:
+        type: b3LocalManifold
+        array_field: points
+        count_field: pointCount
+        return_element: Box3DLocalManifoldPoint
+        default_capacity: 4
+  b3CollideSphereAndTriangle:
+    manifold:
+      direction: output
+      count_param: capacity
+      output_struct:
+        type: b3LocalManifold
+        array_field: points
+        count_field: pointCount
+        return_element: Box3DLocalManifoldPoint
+        default_capacity: 4
+    triangleB:
+      direction: input
+      count_param: triangleBCount
+      fixed_count: 3
+  b3CollideCapsuleAndTriangle:
+    manifold:
+      direction: output
+      count_param: capacity
+      output_struct:
+        type: b3LocalManifold
+        array_field: points
+        count_field: pointCount
+        return_element: Box3DLocalManifoldPoint
+        default_capacity: 4
+    triangleB:
+      direction: input
+      count_param: triangleBCount
+      fixed_count: 3
+  b3CollideHullAndTriangle:
+    manifold:
+      direction: output
+      count_param: capacity
+      output_struct:
+        type: b3LocalManifold
+        array_field: points
+        count_field: pointCount
+        return_element: Box3DLocalManifoldPoint
+        default_capacity: 4
+  b3CollideHullAndSphere:
+    manifold:
+      direction: output
+      count_param: capacity
+      output_struct:
+        type: b3LocalManifold
+        array_field: points
+        count_field: pointCount
+        return_element: Box3DLocalManifoldPoint
+        default_capacity: 4
+  b3CollideHullAndCapsule:
+    manifold:
+      direction: output
+      count_param: capacity
+      output_struct:
+        type: b3LocalManifold
+        array_field: points
+        count_field: pointCount
+        return_element: Box3DLocalManifoldPoint
+        default_capacity: 4
+  b3CollideCapsuleAndSphere:
+    manifold:
+      direction: output
+      count_param: capacity
+      output_struct:
+        type: b3LocalManifold
+        array_field: points
+        count_field: pointCount
+        return_element: Box3DLocalManifoldPoint
+        default_capacity: 4
+
+# Skip list: structs that shouldn't have data class generation.
+# Collision query types (clean) are now generated as data classes.
+# Types with pointer fields, opaque handles, or complex arrays remain skipped.
+skip_structs:
+  # Opaque handles
+  - b3DynamicTree
+  - b3Recording
+  - b3RecPlayer
+  # Complex data structures (pointer fields, heap-allocated internals).
+  # b3HullData/b3MeshData/b3HeightData/b3CompoundData are NOT here: they are
+  # heap blobs inferred by the parser and wrapped in owning RefCounted classes.
+  # Shape proxy with pointer array field (temporarily unbound; audit complains)
+  - b3ShapeProxy
+  # Collision internals with complex array patterns
+  - b3Simplex
+  - b3GjkCache
+  - b3ContactCache
+  - b3Manifold
+  # Debug/rendering
+  - b3DebugShape
+  - b3DebugDraw
+  # Event iteration (pointer fields)
+  - b3BodyEvents
+  - b3SensorEvents
+  - b3ContactEvents
+  - b3JointEvents
+  - b3BodyMoveEvent
+  - b3SensorBeginTouchEvent
+  - b3SensorEndTouchEvent
+  - b3ContactBeginTouchEvent
+  - b3ContactEndTouchEvent
+  - b3ContactHitEvent
+  - b3JointEvent
+  - b3BodyCastResult
+  - b3BodyPlaneResult
+  # Dynamic tree internals
+  - b3TreeNode
+  # Recording internals
+  - b3RecQueryInfo
+  - b3RecQueryHit

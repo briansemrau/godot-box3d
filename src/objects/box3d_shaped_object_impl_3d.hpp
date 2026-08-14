@@ -6,6 +6,7 @@
 
 #include <godot_cpp/templates/local_vector.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/variant.hpp>
 
 #include <box3d/id.h>
 
@@ -52,7 +53,11 @@ public:
 
 	void set_shape_disabled(int32_t p_index, bool p_disabled);
 
-	void set_space(Box3DSpace3D* p_space) override;
+  void set_space(Box3DSpace3D* p_space) override;
+
+	void set_user_data(const Variant& p_data) { user_data = p_data; }
+
+	Variant get_user_data() const { return user_data; }
 
 	// Rebuilds every live b3ShapeId for the current body (used after (re)attaching to a
 	// space, and after body type transitions that need shapes recreated).
@@ -89,6 +94,8 @@ private:
 
 	LocalVector<Box3DShapeInstance3D> shapes;
 
-	// Cached so the transform is available even while detached from a space (no body_id).
+ // Cached so the transform is available even while detached from a space (no body_id).
 	Transform3D cached_transform;
+
+	Variant user_data;
 };

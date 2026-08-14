@@ -6,6 +6,8 @@
 #include "servers/box3d_physics_server_3d.hpp"
 #include "spaces/box3d_physics_direct_space_state_3d.hpp"
 
+#include "bindings/data_classes/data_classes.gen.hpp"
+
 #include <godot_cpp/classes/physics_server3d_manager.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/defs.hpp>
@@ -30,6 +32,8 @@ void initialize_box3d_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_VIRTUAL_CLASS(Box3DPhysicsServer3D);
 
 		ClassDB::register_class<Box3DAPI>();
+
+		register_data_classes();
 
 		PhysicsServer3DManager::get_singleton()->register_server(
 				"Box3D Physics (Extension)",

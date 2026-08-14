@@ -2,3 +2,9 @@ build/
 .fetchcontent-cache/
 bin/
 test_project/.godot/
+.cache/
+__pycache__/
+src/bindings/
+doc_classes/
+.DS_Store
+.venv/
