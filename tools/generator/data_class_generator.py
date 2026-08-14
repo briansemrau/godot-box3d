@@ -1,6 +1,6 @@
 """Generate C++ GDExtension data classes for Box3D structs.
 
-For each struct marked as 'data_class' in type_map.yaml, generates a RefCounted
+For each struct marked as 'data_class' in config.yaml, generates a RefCounted
 subclass with typed properties, to_b3()/from_b3() conversion methods, and
 ClassDB registration via _bind_methods().
 """
@@ -8,29 +8,25 @@ ClassDB registration via _bind_methods().
 import shutil
 from pathlib import Path
 
+from classification import blob_structs, infer_clone_fn, infer_destroy_fn, prepare_type_map
+from config import load_config
+from naming import data_class_filename, to_godot_class_name, to_snake_case
 from parser import (
     Struct,
-    StructField,
     parse_headers,
+)
+from struct_model import (
+    FieldClassification,
+    classify_field,
+    collect_convertible_fields,
+    compute_struct_dependencies,
+    resolve_field_type,
+    topological_sort,
 )
 from type_conversions import (
     convert_to_b3,
     convert_to_godot,
     to_godot_type,
-)
-from classification import blob_structs, infer_clone_fn, infer_destroy_fn
-from utils import (
-    FieldClassification,
-    build_enum_info,
-    classify_field,
-    collect_convertible_fields,
-    compute_struct_dependencies,
-    data_class_filename,
-    load_type_map,
-    to_godot_class_name,
-    to_snake_case,
-    topological_sort,
-    _resolve_field_type,
 )
 
 
@@ -169,7 +165,7 @@ def generate_header(struct: Struct, type_map: dict, all_struct_names: set,
 
     # Getter/setter declarations
     for field, cls in convertible_fields:
-        godot_type = _resolve_field_type(field, cls, type_map)["cpp"]
+        godot_type = resolve_field_type(field, cls, type_map)["cpp"]
         prop_name = to_snake_case(field.name)
 
         lines.append(f"{T}{godot_type} get_{prop_name}() const;")
@@ -248,7 +244,7 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
             lines.append("")
         elif cls == FieldClassification.NESTED_STRUCT:
             nested_cls = to_godot_class_name(field.type)
-            godot_type = _resolve_field_type(field, cls, type_map)["cpp"]
+            godot_type = resolve_field_type(field, cls, type_map)["cpp"]
             lines.append(f"{godot_type} {cls_name}::get_{prop_name}() const {{")
             lines.append(f"{T}Ref<{nested_cls}> ref;")
             lines.append(f"{T}ref.instantiate();")
@@ -263,7 +259,7 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
         else:
             field_access = f"_data_ptr->{field.name}"
             conv = convert_to_godot(field_access, field.type, type_map)
-            lines.append(f"{_resolve_field_type(field, cls, type_map)['cpp']} {cls_name}::get_{prop_name}() const {{")
+            lines.append(f"{resolve_field_type(field, cls, type_map)['cpp']} {cls_name}::get_{prop_name}() const {{")
             lines.append(f"{T}return {conv};")
             lines.append("}")
             lines.append("")
@@ -271,7 +267,7 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
     # --- Setters ---
     for field, cls in convertible_fields:
         prop_name = to_snake_case(field.name)
-        godot_type = _resolve_field_type(field, cls, type_map)["cpp"]
+        godot_type = resolve_field_type(field, cls, type_map)["cpp"]
         param = f"p_{prop_name}"
 
         if cls == FieldClassification.ARRAY:
@@ -354,7 +350,7 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
         prop_name = to_snake_case(field.name)
         getter = f"get_{prop_name}"
         setter = f"set_{prop_name}"
-        variant_type = _resolve_field_type(field, cls, type_map)["variant"]
+        variant_type = resolve_field_type(field, cls, type_map)["variant"]
 
         # For Ref<T> types, we need the class name string
         # godot-cpp ADD_PROPERTY signature: (property_info, setter, getter)
@@ -547,7 +543,7 @@ def generate_blob_implementation(struct: Struct, type_map: dict, all_struct_name
 
     for field, cls in fields:
         prop_name = to_snake_case(field.name)
-        variant_type = _resolve_field_type(field, cls, type_map)["variant"]
+        variant_type = resolve_field_type(field, cls, type_map)["variant"]
         lines.append(
             f'{T}ADD_PROPERTY(PropertyInfo({variant_type}, "{prop_name}"), '
             f'"set_{prop_name}", "get_{prop_name}");'
@@ -563,14 +559,13 @@ def generate_data_classes(root: str) -> tuple[int, list[str]]:
 
     Returns (class_count, warnings).
     """
-    type_map = load_type_map(root)
+    type_map = load_config(root)
     data = parse_headers(root)
+    prepare_type_map(type_map, data)
 
     skip_structs = set(type_map.get("skip_structs", []))
     math_types = set(type_map.get("math_types", {}).keys())
     id_types = set(type_map.get("id_types", {}).keys())
-    skip_enum_names = set(type_map.get("skip_enums", []))
-    type_map["enums"], type_map["enum_constants"] = build_enum_info(data["enums"], skip_enum_names)
 
     # Blob structs inferred by parser (byteCount + Offset fields).
     # These get separate RefCounted wrappers instead of embedded mode.

@@ -3,7 +3,7 @@
 
 Usage:
     python generate.py audit         # Check API coverage
-    python generate.py stubs         # Generate binding stubs
+    python generate.py bindings      # Generate C++ bindings
     python generate.py data_classes  # Generate data class types
     python generate.py docs          # Generate Godot class reference XML
     python generate.py               # Run all
@@ -25,7 +25,7 @@ def main():
         "action",
         nargs="?",
         default="all",
-        choices=["all", "audit", "stubs", "data_classes", "docs"],
+        choices=["all", "audit", "bindings", "data_classes", "docs"],
         help="Action to perform (default: all)",
     )
     parser.add_argument(
@@ -45,8 +45,6 @@ def main():
             print(f"  warnings: {len(warnings)}")
 
     if args.action in ("all", "audit"):
-        import yaml
-        from parser import parse_headers, classify_domain
         from audit import audit, print_report
 
         results = audit(str(root))
@@ -54,14 +52,15 @@ def main():
         if (results["missing"] or results["handwritten_missing"]) and args.action == "audit":
             sys.exit(1)
 
-    if args.action in ("all", "stubs"):
-        import yaml
-        from stubs import load_type_map, collect_generatable, write_output
+    if args.action in ("all", "bindings"):
+        from binding_generator import write_output
+        from classification import collect_generatable
+        from config import load_config
 
-        type_map = load_type_map(str(root))
+        type_map = load_config(str(root))
         domains = collect_generatable(str(root), type_map)
         total = sum(len(f) for f in domains.values())
-        print(f"\nGenerating stubs for {total} functions across {len(domains)} domains:")
+        print(f"\nGenerating bindings for {total} functions across {len(domains)} domains:")
         for domain, funcs in sorted(domains.items()):
             print(f"  {domain}: {len(funcs)} functions")
         write_output(str(root), domains, type_map)

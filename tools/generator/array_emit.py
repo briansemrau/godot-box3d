@@ -1,71 +1,20 @@
-"""Array parameter stub generation for Box3D API bindings.
+"""Array-parameter method emission for Box3D API bindings.
 
 Handles C-style array parameters (Type* arr, int count) by generating
 Godot-compatible wrappers that allocate buffers, call the C API, and
-convert results to Godot array types.
+convert results to Godot array types. Array *detection* lives in
+array_detection.py; this module turns the detected metadata into code.
 """
 
+from naming import to_godot_class_name, to_godot_name, to_godot_param_name
 from parser import ArrayDirection, Function, is_struct_type
 from type_conversions import (
     array_element_godot_type,
     convert_to_b3,
-    convert_to_godot,
+    emit_return_lines,
     godot_default_value,
     to_godot_type,
 )
-from utils import (
-    to_godot_class_name,
-    to_godot_name,
-    to_godot_param_name,
-)
-
-
-def _emit_return_lines(lines: list, func: Function, type_map: dict, call_args: list,
-                       blobs: set, data: dict, indent: str = "    ") -> None:
-    """Append the C call and return conversion to ``lines``.
-
-    Handles void, blob pointer returns (owning RefCounted wrap; const views are
-    deep-cloned first), and ordinary value returns. Shared by the plain and
-    array-aware stub generators so blob handling never diverges.
-    """
-    from classification import infer_clone_fn
-
-    args_str = ", ".join(call_args)
-    is_void = func.return_type == "void"
-    is_ptr_return = "*" in func.return_type and "char" not in func.return_type
-
-    if is_void:
-        lines.append(f"{indent}{func.name}({args_str});")
-        return
-
-    if is_ptr_return:
-        ret_clean = func.return_type.replace("const ", "").replace("*", "").strip()
-        if ret_clean in blobs:
-            ret_const = "const" in func.return_type
-            cls_name = to_godot_class_name(ret_clean)
-            if ret_const:
-                clone_fn = infer_clone_fn(ret_clean, data)
-                if clone_fn is None:
-                    return
-                raw_decl = f"const {ret_clean}* raw = {func.name}({args_str});"
-                raw_expr = f"{clone_fn}(raw)"
-            else:
-                raw_decl = f"{ret_clean}* raw = {func.name}({args_str});"
-                raw_expr = "raw"
-            lines.append(f"{indent}Ref<{cls_name}> result;")
-            lines.append(f"{indent}{raw_decl}")
-            lines.append(f"{indent}if (raw) {{")
-            lines.append(f"{indent}    result.instantiate();")
-            lines.append(f"{indent}    result->take_ownership({raw_expr});")
-            lines.append(f"{indent}}}")
-            lines.append(f"{indent}return result;")
-            return
-
-    convert_expr = convert_to_godot(
-        f"{func.name}({args_str})", func.return_type, type_map,
-        is_pointer="*" in func.return_type,
-    )
-    lines.append(f"{indent}return {convert_expr};")
 
 
 def _is_output_struct_param(param) -> bool:
@@ -103,8 +52,6 @@ def get_skip_param_names(func: Function) -> set:
 
 def get_godot_params(func: Function, type_map: dict, qualified: bool = True) -> list:
     """Get (type, name) pairs for Godot signature, excluding OUTPUT array params and count params."""
-    from type_conversions import to_godot_type
-
     skip_names = get_skip_param_names(func)
     result = []
     has_output_struct = any(_is_output_struct_param(p) for p in func.params)
@@ -386,7 +333,7 @@ def _generate_input_array_stub(func: Function, type_map: dict, blobs: set = None
 
     args_str = ", ".join(call_args)
 
-    _emit_return_lines(lines, func, type_map, call_args, blobs, data)
+    emit_return_lines(lines, func, type_map, call_args, blobs, data)
 
     sig = f"{ret_godot} Box3DAPI::{godot_name}({params_str})"
     return f"{sig} {{\n" + "\n".join(lines) + "\n}"
@@ -399,8 +346,6 @@ def _generate_output_struct_stub(func: Function, type_map: dict) -> str:
     The wrapper allocates the struct with an internal buffer, calls the C function,
     and returns TypedArray<return_element>.
     """
-    from parser import is_struct_type
-
     godot_name = to_godot_name(func.name)
     array_params = get_array_params(func)
     output_param = None

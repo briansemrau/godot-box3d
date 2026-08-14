@@ -8,29 +8,27 @@ import re
 import shutil
 from pathlib import Path
 
+from classification import collect_generatable
+from config import load_config
+from naming import (
+    data_class_filename,
+    to_godot_class_name,
+    to_godot_name,
+    to_snake_case,
+)
 from parser import (
     Function,
     Struct,
     classify_domain,
+    is_string_type,
     parse_headers,
 )
-from stubs import (
-    collect_generatable,
+from struct_model import (
+    collect_convertible_fields,
+    resolve_field_type,
 )
 from type_conversions import (
     to_godot_type,
-)
-from utils import (
-    FieldClassification,
-    classify_field,
-    collect_convertible_fields,
-    data_class_filename,
-    is_string_type,
-    load_type_map,
-    to_godot_class_name,
-    to_godot_name,
-    to_snake_case,
-    _resolve_field_type,
 )
 
 
@@ -171,8 +169,8 @@ def generate_data_class_xml(struct: Struct, type_map: dict, all_struct_names: se
     lines.append('<?xml version="1.0" encoding="UTF-8" ?>')
     lines.append(f'<class name="{cls_name}" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">')
 
-    # Brief description from struct doc
-    brief = doxygen_to_bbcode(struct.doc) if struct.doc else f"Wrapper for {struct.name}."
+    # Brief description — short bindings-layer summary (distinct from the full doc)
+    brief = f"Box3D bindings data class for the [code]{struct.name}[/code] struct. Use with [code]Box3DAPI[/code]."
     lines.append('\t<brief_description>')
     lines.append(f'\t\t{brief}')
     lines.append('\t</brief_description>')
@@ -187,7 +185,7 @@ def generate_data_class_xml(struct: Struct, type_map: dict, all_struct_names: se
     lines.append('\t<members>')
     for field, cls in convertible_fields:
         prop_name = to_snake_case(field.name)
-        xml_type = _resolve_field_type(field, cls, type_map)["xml"]
+        xml_type = resolve_field_type(field, cls, type_map)["xml"]
         setter = f"set_{prop_name}"
         getter = f"get_{prop_name}"
         field_doc = doxygen_to_bbcode(field.doc)
@@ -206,8 +204,7 @@ def generate_data_class_xml(struct: Struct, type_map: dict, all_struct_names: se
     return "\n".join(lines)
 
 
-def generate_data_class_docs(root: str, type_map: dict, structs: list[Struct],
-                              enums: list) -> int:
+def generate_data_class_docs(root: str, type_map: dict, structs: list[Struct]) -> int:
     """Generate Godot class reference XML for all data classes.
 
     Returns the number of data class XML files generated.
@@ -215,9 +212,6 @@ def generate_data_class_docs(root: str, type_map: dict, structs: list[Struct],
     skip_structs = set(type_map.get("skip_structs", []))
     math_types = set(type_map.get("math_types", {}).keys())
     id_types = set(type_map.get("id_types", {}).keys())
-    skip_enum_names = set(type_map.get("skip_enums", []))
-    from utils import build_enum_info
-    type_map["enums"], type_map["enum_constants"] = build_enum_info(enums, skip_enum_names)
 
     # Filter: all structs except skip_structs, math_types, id_types
     candidates = [
@@ -261,7 +255,7 @@ def generate_docs(root: str):
 
     Returns path to generated XML file.
     """
-    type_map = load_type_map(root)
+    type_map = load_config(root)
     domains = collect_generatable(root, type_map)
     all_functions = []
     for funcs in domains.values():
@@ -290,7 +284,7 @@ def generate_docs(root: str):
 
     # Generate data class documentation
     data = parse_headers(root)
-    generate_data_class_docs(root, type_map, data["structs"], data["enums"])
+    generate_data_class_docs(root, type_map, data["structs"])
 
     return out_path
 

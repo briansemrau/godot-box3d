@@ -1,10 +1,10 @@
 """Single source of truth for whether a Box3D function can be auto-generated.
 
-Both the stub generator (``stubs.collect_generatable``) and the audit
-(``audit.audit``) use :func:`classify_function` so they can never disagree
-about what is generatable, what is deliberately skipped, and why.
+Both the binding generator and the audit use :func:`classify_function` so they
+can never disagree about what is generatable, what is deliberately skipped,
+and why.
 
-Skipping is only allowed when backed by an explicit entry in ``type_map.yaml``
+Skipping is only allowed when backed by an explicit entry in ``config.yaml``
 (``skip_functions``, ``skip_types``, ``skip_structs``). Anything skipped for a
 structural reason that has no config entry is an *implicit* skip and is
 reported by the audit so a human can decide whether to support or configure it.
@@ -13,8 +13,9 @@ reported by the audit so a human can decide whether to support or configure it.
 from dataclasses import dataclass, field
 
 from array_detection import apply_array_overrides, detect_array_params
-from parser import classify_domain, is_struct_type
-from utils import collect_convertible_fields, is_string_type, to_godot_name
+from naming import build_enum_info, to_godot_name
+from parser import classify_domain, is_string_type, is_struct_type, parse_headers
+from struct_model import collect_convertible_fields
 
 GENERATE = "generate"
 SKIP = "skip"
@@ -24,12 +25,10 @@ def prepare_type_map(type_map: dict, data: dict) -> dict:
     """Populate derived type_map entries needed by classification.
 
     Enum info (``enums``, ``enum_constants``) is derived from the parsed
-    headers. Both the stub generator and the audit must call this so enum-typed
-    functions classify identically.
+    headers. Both the binding generator and the audit must call this so
+    enum-typed functions classify identically.
     """
     if "enums" not in type_map or not type_map["enums"]:
-        from utils import build_enum_info
-
         skip_enum_names = set(type_map.get("skip_enums", []))
         type_map["enums"], type_map["enum_constants"] = build_enum_info(
             data.get("enums", []), skip_enum_names
@@ -205,3 +204,23 @@ def classify_function(func, data: dict, type_map: dict) -> FuncVerdict:
                          configured=False)
 
     return FuncVerdict(func, domain, godot_name, GENERATE, array_params=detected)
+
+
+def collect_generatable(root: str, type_map: dict) -> dict:
+    """Parse headers and collect all generatable functions, grouped by domain.
+
+    Uses :func:`classify_function` as the single source of truth. Domain is
+    purely a grouping key for output files — no function is ever dropped for
+    landing in the "other" bucket.
+    """
+    data = parse_headers(root)
+    prepare_type_map(type_map, data)
+
+    domains = {}
+    for func in data["functions"]:
+        verdict = classify_function(func, data, type_map)
+        if verdict.decision != GENERATE:
+            continue
+        domains.setdefault(verdict.domain, []).append(func)
+
+    return domains

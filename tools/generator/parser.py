@@ -103,6 +103,11 @@ def is_struct_type(type_str: str) -> bool:
     return type_str.startswith("b3") and not is_pointer_type(type_str)
 
 
+def is_string_type(param) -> bool:
+    """Check if a parameter is a C string (const char*)."""
+    return param.type == "char" and param.pointer
+
+
 # --- Parameter parsing ---
 
 _PARAM_RE = re.compile(

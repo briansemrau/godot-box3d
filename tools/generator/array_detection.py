@@ -26,7 +26,7 @@ def _is_array_candidate(param: Param, skip_types: set) -> bool:
     # Skip void* (opaque data)
     if param.type == "void":
         return False
-    # Skip types listed in type_map.yaml skip_types
+    # Skip types listed in config.yaml skip_types
     if param.type in skip_types:
         return False
     return True
@@ -175,7 +175,7 @@ def apply_array_overrides(
 ) -> dict[str, ArrayParamInfo]:
     """Apply config overrides on top of auto-detected array params.
 
-    Overrides is a dict from type_map.yaml array_params section:
+    Overrides is a dict from config.yaml array_params section:
     {
         "paramName": {
             "direction": "output",  # optional

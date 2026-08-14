@@ -3,7 +3,7 @@
 Beyond the bound/skipped/missing tally the audit now also verifies:
 
 - **Hand-written implementations**: functions listed in ``handwritten_functions``
-  (type_map.yaml) must have a matching declaration in ``src/api/*.hpp``. Missing
+  (config.yaml) must have a matching declaration in ``src/api/*.hpp``. Missing
   ones are reported as ``handwritten_missing`` and count toward the failure exit
   code — this is what surfaces the missing creation/callback/event layer.
 - **Config drift**: every entry in the config lists is checked against the parsed
@@ -19,8 +19,10 @@ import re
 import sys
 from pathlib import Path
 
-from parser import parse_headers
-from utils import load_type_map
+from classification import SKIP, blob_structs, classify_function, prepare_type_map
+from config import load_config
+from parser import ArrayDirection, parse_headers
+from struct_model import collect_convertible_fields
 
 
 def load_existing_bindings(root: str) -> set:
@@ -76,13 +78,11 @@ def audit(root: str) -> dict:
     """Run the audit and return results.
 
     Classification is delegated to :func:`classification.classify_function`
-    so the audit can never disagree with the stub generator about what is
+    so the audit can never disagree with the binding generator about what is
     generatable and what is skipped.
     """
-    from classification import SKIP, classify_function, prepare_type_map
-
     data = parse_headers(root)
-    type_map = load_type_map(root)
+    type_map = load_config(root)
     prepare_type_map(type_map, data)
     bound = load_existing_bindings(root)
     handwritten_declared = load_handwritten_bindings(root)
@@ -211,10 +211,6 @@ def _detect_unused_types(type_map: dict, data: dict, verdicts: dict):
     skips are reported as unused, along with the skipped functions that
     reference them (context for deciding whether to model or blacklist).
     """
-    from classification import SKIP, blob_structs
-
-    from utils import collect_convertible_fields
-
     blobs = blob_structs(data)
     skip_structs = set(type_map.get("skip_structs", []))
     math_types = set(type_map.get("math_types", {}).keys())
@@ -287,8 +283,6 @@ def _detect_unused_types(type_map: dict, data: dict, verdicts: dict):
 
 
 def print_report(results: dict):
-    from parser import ArrayDirection
-
     domains = results["domains"]
     total_covered = sum(d["bound"] for d in domains.values())
     total_skipped = sum(d["skipped"] for d in domains.values())
@@ -314,7 +308,7 @@ def print_report(results: dict):
     # Hand-written implementations
     if results["handwritten_missing"]:
         print(f"\nHand-written missing ({len(results['handwritten_missing'])} configured in "
-              f"type_map.yaml but no src/api/ declaration):")
+              f"config.yaml but no src/api/ declaration):")
         for b3_name, godot_name in sorted(results["handwritten_missing"]):
             print(f"    {b3_name:45s} → {godot_name}")
     else:

@@ -1,15 +1,13 @@
 """Unified type conversion functions for Box3D ↔ Godot bindings.
 
-Centralizes all b3 type → Godot type mapping and C++ expression generation.
-Used by stubs, data class generator, struct converter, and docs generator.
+Centralizes all b3 type → Godot type mapping and C++ expression generation,
+plus return-statement emission. Used by the binding generator, data class
+generator, and docs generator.
 """
 
-from parser import is_scalar_type, is_struct_type
-from utils import (
-    is_data_class_type,
-    to_godot_class_name,
-    to_godot_name,
-)
+from classification import infer_clone_fn
+from naming import to_godot_class_name
+from parser import Function, is_scalar_type, is_struct_type
 
 
 def to_godot_type(b3_type: str, type_map: dict, qualified: bool = True, is_pointer: bool = False) -> str:
@@ -180,6 +178,52 @@ def array_element_godot_type(b3_type: str, type_map: dict, qualified: bool = Tru
         return f"{q}Array"
 
     return t
+
+
+def emit_return_lines(lines: list, func: Function, type_map: dict, call_args: list,
+                      blobs: set, data: dict, indent: str = "    ") -> None:
+    """Append the C call and return conversion to ``lines``.
+
+    Handles void, blob pointer returns (owning RefCounted wrap; const views are
+    deep-cloned first), and ordinary value returns. Shared by the plain and
+    array-aware stub generators so blob handling never diverges.
+    """
+    args_str = ", ".join(call_args)
+    is_void = func.return_type == "void"
+    is_ptr_return = "*" in func.return_type and "char" not in func.return_type
+
+    if is_void:
+        lines.append(f"{indent}{func.name}({args_str});")
+        return
+
+    if is_ptr_return:
+        ret_clean = func.return_type.replace("const ", "").replace("*", "").strip()
+        if ret_clean in blobs:
+            ret_const = "const" in func.return_type
+            cls_name = to_godot_class_name(ret_clean)
+            if ret_const:
+                clone_fn = infer_clone_fn(ret_clean, data)
+                if clone_fn is None:
+                    return
+                raw_decl = f"const {ret_clean}* raw = {func.name}({args_str});"
+                raw_expr = f"{clone_fn}(raw)"
+            else:
+                raw_decl = f"{ret_clean}* raw = {func.name}({args_str});"
+                raw_expr = "raw"
+            lines.append(f"{indent}Ref<{cls_name}> result;")
+            lines.append(f"{indent}{raw_decl}")
+            lines.append(f"{indent}if (raw) {{")
+            lines.append(f"{indent}    result.instantiate();")
+            lines.append(f"{indent}    result->take_ownership({raw_expr});")
+            lines.append(f"{indent}}}")
+            lines.append(f"{indent}return result;")
+            return
+
+    convert_expr = convert_to_godot(
+        f"{func.name}({args_str})", func.return_type, type_map,
+        is_pointer="*" in func.return_type,
+    )
+    lines.append(f"{indent}return {convert_expr};")
 
 
 

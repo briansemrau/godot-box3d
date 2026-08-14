@@ -3,13 +3,13 @@
 Generates C++ GDExtension bindings and struct data classes for the Box3D C API,
 producing the static `Box3DAPI` class exposed to GDScript.
 
-- Binding stubs → `src/bindings/box3d_api_*.gen.cpp` (+ `box3d_api_generated.gen.hpp`,
+- Binding methods → `src/bindings/box3d_api_*.gen.cpp` (+ `box3d_api_generated.gen.hpp`,
   `box3d_api_register.gen.cpp`)
 - Struct data classes → `src/bindings/data_classes/`
 - Godot class reference XML → `doc_classes/` (embedded into the binary at build time)
 
 All generated output is gitignored and **swept before each run**, so what's on disk
-always matches the current generator + `type_map.yaml`.
+always matches the current generator + `config.yaml`.
 
 ## Setup (one-time)
 
@@ -24,12 +24,12 @@ Creates a Python venv at `tools/generator/.venv` with the required dependencies 
 From the repo root:
 
 ```bash
-# Run everything (data classes → audit → stubs → docs)
+# Run everything (data classes → audit → bindings → docs)
 tools/generator/.venv/bin/python tools/generator/generate.py all
 
 # Or individual steps:
 tools/generator/.venv/bin/python tools/generator/generate.py audit         # coverage report
-tools/generator/.venv/bin/python tools/generator/generate.py stubs         # binding stubs
+tools/generator/.venv/bin/python tools/generator/generate.py bindings      # C++ binding methods
 tools/generator/.venv/bin/python tools/generator/generate.py data_classes  # struct data classes
 tools/generator/.venv/bin/python tools/generator/generate.py docs          # class reference XML
 ```
@@ -49,7 +49,7 @@ Output: `bin/libgodot-box3d.{so,dynlib,dll}`
 
 ### `audit`
 Parses the Box3D headers and reports coverage: bound / skipped / missing, per
-domain, plus any *implicit* skips (structural skips with no `type_map.yaml` entry)
+domain, plus any *implicit* skips (structural skips with no `config.yaml` entry)
 that need a human decision. Exits with error code 1 if any functions are missing.
 It also verifies:
 - **Hand-written coverage** — every function listed in `handwritten_functions`
@@ -62,8 +62,8 @@ It also verifies:
   hand-written function (transitively) references — the checklist for scope
   trimming.
 
-### `stubs`
-Parses the Box3D headers → generates `Box3DAPI` static method stubs →
+### `bindings`
+Parses the Box3D headers → generates `Box3DAPI` static method bindings →
 `src/bindings/`. Handles C-style array parameters (auto-detected direction/count,
 with overrides), output structs with internal arrays (collision manifolds), and
 owning RefCounted wrappers for heap-blob returns.
@@ -81,7 +81,7 @@ time via `embed_doc_data.py` (wired up in `cmake/GodotBox3DEmbedDocs.cmake`).
 
 ## Configuration
 
-All configuration is in `type_map.yaml`:
+All configuration is in `config.yaml`:
 
 - `skip_structs` — structs that should NOT get data classes (opaque handles,
   event iteration types, collision internals)
@@ -106,10 +106,10 @@ handles exceptions (blacklists).
 ## Classification
 
 `classification.py` is the single source of truth for whether a function can be
-auto-generated. Both the stub generator and the audit use
+auto-generated. Both the binding generator and the audit use
 `classification.classify_function`, so they can never disagree about what is
 generatable, what is deliberately skipped, and why. Skipping is only allowed when
-backed by an explicit `type_map.yaml` entry; structural skips without one are
+backed by an explicit `config.yaml` entry; structural skips without one are
 reported by the audit as *implicit* skips.
 
 ## Adding Hand-Written Bindings
@@ -119,7 +119,7 @@ For functions that can't be auto-generated (output pointers, user data, complex 
 1. Add the declaration to `src/api/box3d_api.hpp`
 2. Add the implementation to `src/api/box3d_api.cpp` (or a sibling, e.g. `box3d_api_collision.cpp`)
 3. Add the `ClassDB::bind_static_method()` call in `Box3DAPI::_bind_methods()`
-4. Add the b3 function name to `handwritten_functions` in `type_map.yaml` so the
+4. Add the b3 function name to `handwritten_functions` in `config.yaml` so the
    generator never auto-generates it and the audit verifies your implementation
    exists (it reports a failure until the declaration is present)
 
@@ -130,7 +130,8 @@ Box3D C headers
     ↓ parser.py (extract functions, structs, enums, docs)
     ├── classification.py  (decide generate vs. skip — shared with audit)
     ├── array_detection.py (detect C-style array params)
-    ├── stubs.py           → src/bindings/box3d_api_*.gen.cpp (+ header + register)
+    ├── array_emit.py      (emit array-aware method bodies)
+    ├── binding_generator.py → src/bindings/box3d_api_*.gen.cpp (+ header + register)
     ├── data_class_generator.py → src/bindings/data_classes/
     ├── audit.py           → coverage report
     └── docs.py            → doc_classes/*.xml (embedded at build)

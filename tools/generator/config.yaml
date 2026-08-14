@@ -69,7 +69,7 @@ math_types:
 
 # Enum types (map to int) — auto-detected from headers.
 # Use skip_enums to exclude any that shouldn't be treated as int.
-# enums: populated automatically by stubs.py from parsed headers.
+# enums: populated automatically by classification.py from parsed headers.
 
 # Enum blacklist — types parsed as enums but should NOT map to int
 skip_enums:
@@ -149,6 +149,7 @@ skip_functions:
   - b3Sleep
   - b3Hash
   - b3InternalAssert
+  # Internal / not implemented by Box3D -> linker error
   - b3World_DumpShapeBounds
 
 # Hand-written functions: intentionally NOT auto-generated because a human
