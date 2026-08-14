@@ -5,6 +5,8 @@
 
 #include <box3d/id.h>
 
+typedef struct b3MeshData b3MeshData;
+
 class Box3DShapeImpl3D;
 class Box3DShapedObjectImpl3D;
 
@@ -48,11 +50,17 @@ public:
 	void set_user_data(const Variant& p_data) { user_data = p_data; }
 
 	Variant get_user_data() const { return user_data; }
+	
+	// Set when a trimesh instance needs its local transform baked into its own mesh copy.
+	b3MeshData* get_owned_mesh() const { return owned_mesh; }
+
+	void set_owned_mesh(b3MeshData* p_mesh) { owned_mesh = p_mesh; }
 
 private:
 	Box3DShapeImpl3D* shape = nullptr;
 	Transform3D transform;
 	b3ShapeId shape_id = b3_nullShapeId;
+	b3MeshData* owned_mesh = nullptr;
 	uint32_t index = 0;
 	bool disabled = false;
 	Variant user_data;

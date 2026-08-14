@@ -49,6 +49,12 @@ else()
 	)
 endif()
 
+# Cross-compiling only works if the sub-build gets the same toolchain.
+set(GODOT_CPP_TOOLCHAIN_ARGS "")
+if(CMAKE_TOOLCHAIN_FILE)
+	list(APPEND GODOT_CPP_TOOLCHAIN_ARGS "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
+endif()
+
 ExternalProject_Add(godot-cpp-external
 	PREFIX "${GODOT_CPP_PREFIX}"
 	GIT_REPOSITORY "${GODOT_CPP_GIT_REPOSITORY}"
@@ -61,6 +67,7 @@ ExternalProject_Add(godot-cpp-external
 		-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
 		-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
 		-DCMAKE_POSITION_INDEPENDENT_CODE=ON
+		${GODOT_CPP_TOOLCHAIN_ARGS}
 		${GODOT_CPP_BUILD_TYPE_ARG}
 	BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> ${GODOT_CPP_BUILD_CONFIG_ARG} --target godot-cpp
 	INSTALL_COMMAND ""

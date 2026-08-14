@@ -5,6 +5,7 @@
 #include "../shapes/box3d_box_shape_impl_3d.hpp"
 #include "../shapes/box3d_capsule_shape_impl_3d.hpp"
 #include "../shapes/box3d_convex_polygon_shape_impl_3d.hpp"
+#include "../shapes/box3d_cylinder_shape_impl_3d.hpp"
 #include "../shapes/box3d_shape_impl_3d.hpp"
 #include "../shapes/box3d_sphere_shape_impl_3d.hpp"
 
@@ -56,6 +57,27 @@ Box3DShapeProxy3D::Box3DShapeProxy3D(const Box3DShapeImpl3D* p_shape, const Tran
 			}
 			proxy.points = points.ptr();
 			proxy.count = 8;
+			proxy.radius = 0.0f;
+			supported = true;
+			break;
+		}
+
+		case PhysicsServer3D::SHAPE_CYLINDER: {
+			const auto* cylinder = static_cast<const Box3DCylinderShapeImpl3D*>(p_shape);
+			const real_t radius = cylinder->get_radius();
+			const real_t half_height = cylinder->get_height() * 0.5;
+			// Match the tessellation b3CreateCylinder() uses for the simulated hull.
+			const int sides = Box3DCylinderShapeImpl3D::HULL_SIDES;
+			points.resize(2 * sides);
+			for (int i = 0; i < sides; i++) {
+				const real_t angle = Math_TAU * (real_t)i / (real_t)sides;
+				const real_t x = radius * Math::cos(angle);
+				const real_t z = radius * Math::sin(angle);
+				points[2 * i + 0] = godot_to_b3(p_transform.xform(Vector3(x, -half_height, z)));
+				points[2 * i + 1] = godot_to_b3(p_transform.xform(Vector3(x, half_height, z)));
+			}
+			proxy.points = points.ptr();
+			proxy.count = 2 * sides;
 			proxy.radius = 0.0f;
 			supported = true;
 			break;

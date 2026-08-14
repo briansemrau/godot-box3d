@@ -1,5 +1,6 @@
 #include "box3d_space_3d.hpp"
 
+#include "../misc/box3d_globals.hpp"
 #include "../misc/type_conversions.hpp"
 #include "../objects/box3d_area_impl_3d.hpp"
 #include "../objects/box3d_body_impl_3d.hpp"
@@ -16,7 +17,8 @@ constexpr int SUB_STEP_COUNT = 4;
 
 Box3DSpace3D::Box3DSpace3D() {
 	b3WorldDef def = b3DefaultWorldDef();
-	def.workerCount = 1;
+	// With no task callbacks set, any count above 1 engages Box3D's internal scheduler.
+	def.workerCount = box3d_worker_count();
 	def.userData = this;
 	world_id = b3CreateWorld(&def);
 
@@ -82,41 +84,8 @@ void Box3DSpace3D::step(float p_step) {
 
 	_apply_area_overrides();
 
-	LocalVector<RID> body_rids;
-	body_rids.reserve(bodies.size());
 	for (Box3DBodyImpl3D* body : bodies) {
-		body_rids.push_back(body->get_rid());
-	}
-
-	// Integration callbacks may detach or free bodies. Resolve a RID snapshot before and
-	// after each callback so user code cannot invalidate HashSet iteration or leave a stale
-	// body pointer in use.
-	for (const RID& body_rid : body_rids) {
-		Box3DBodyImpl3D* body = Box3DPhysicsServer3D::get_singleton()->get_body(body_rid);
-		if (body == nullptr || body->get_space() != this) {
-			continue;
-		}
-
-		const Callable callback = body->get_force_integration_callback();
-		if (callback.is_valid()) {
-			Box3DPhysicsDirectBodyState3D* state = body->get_direct_state_or_null();
-			const Variant userdata = body->get_force_integration_userdata();
-			Array arguments;
-			if (userdata.get_type() == Variant::NIL) {
-				arguments.resize(1);
-				arguments[0] = state;
-			} else {
-				arguments.resize(2);
-				arguments[0] = state;
-				arguments[1] = userdata;
-			}
-			callback.callv(arguments);
-		}
-
-		body = Box3DPhysicsServer3D::get_singleton()->get_body(body_rid);
-		if (body != nullptr && body->get_space() == this) {
-			body->pre_step();
-		}
+		body->pre_step();
 	}
 
 	b3World_Step(world_id, p_step, SUB_STEP_COUNT);
@@ -124,34 +93,152 @@ void Box3DSpace3D::step(float p_step) {
 	_pull_body_events();
 	_pull_sensor_events();
 
-	// Contact and joint events are intentionally not drained into any callback pipeline
-	// for v1: RigidBody3D contact monitoring is served on-demand via
-	// b3Body_GetContactData, and joint events are ignored, per the plan. We still fetch
-	// them here so any internal Box3D per-step bookkeeping tied to fetching is exercised
-	// consistently, though this is not strictly required by the API.
+	// Manifold pointers are only valid until the next step, so cache contacts now.
+	for (Box3DBodyImpl3D* body : bodies) {
+		body->refresh_contacts();
+	}
+
+	// Drained only so Box3D's per-step event bookkeeping stays consistent; joint events are unused.
 	b3World_GetContactEvents(world_id);
 	b3World_GetJointEvents(world_id);
 }
 
-void Box3DSpace3D::_apply_area_overrides() {
+// Godot walks areas highest priority first, so a REPLACE there wins; ties stay stable.
+struct AreaPriorityComparator {
+	bool operator()(Box3DAreaImpl3D* p_a, Box3DAreaImpl3D* p_b) const {
+		if (p_a->get_priority() != p_b->get_priority()) {
+			return p_a->get_priority() > p_b->get_priority();
+		}
+		return p_a->get_rid().get_id() > p_b->get_rid().get_id();
+	}
+};
+
+Box3DSpace3D::AreaOverrides Box3DSpace3D::compute_area_overrides(Box3DBodyImpl3D* p_body) const {
+	AreaOverrides result;
+	result.linear_damp = p_body->get_linear_damping();
+	result.angular_damp = p_body->get_angular_damping();
+
+	LocalVector<Box3DAreaImpl3D*> overlapping;
 	for (Box3DAreaImpl3D* area : areas) {
 		if (area->get_gravity_mode() == PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED &&
 				area->get_linear_damp_mode() == PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED &&
 				area->get_angular_damp_mode() == PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED) {
 			continue;
 		}
+		if (area->get_overlaps().has(p_body)) {
+			overlapping.push_back(area);
+		}
+	}
+	if (overlapping.is_empty()) {
+		return result;
+	}
+	overlapping.sort_custom<AreaPriorityComparator>();
 
-		for (const KeyValue<Box3DShapedObjectImpl3D*, int32_t>& overlap : area->get_overlaps()) {
-			auto* body = dynamic_cast<Box3DBodyImpl3D*>(overlap.key);
-			if (body == nullptr || !body->has_body_id()) {
-				continue;
-			}
-			if (!body->is_omitting_force_integration() &&
-					area->get_gravity_mode() != PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED) {
-				const Vector3 gravity = area->compute_gravity(body->get_transform().origin);
-				b3Body_ApplyForceToCenter(body->get_body_id(), godot_to_b3(gravity * (float)body->get_mass()), false);
+	bool gravity_done = false;
+	bool linear_done = false;
+	bool angular_done = false;
+
+	for (Box3DAreaImpl3D* area : overlapping) {
+		const PhysicsServer3D::AreaSpaceOverrideMode gravity_mode = area->get_gravity_mode();
+		if (!gravity_done && gravity_mode != PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED) {
+			const Vector3 gravity = area->compute_gravity(p_body->get_transform().origin);
+			result.affects_gravity = true;
+			switch (gravity_mode) {
+				case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE:
+					result.gravity += gravity;
+					break;
+				case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE_REPLACE:
+					result.gravity += gravity;
+					result.replaces_world_gravity = true;
+					gravity_done = true;
+					break;
+				case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE:
+					result.gravity = gravity;
+					result.replaces_world_gravity = true;
+					gravity_done = true;
+					break;
+				case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE_COMBINE:
+					result.gravity = gravity;
+					result.replaces_world_gravity = true;
+					break;
+				default:
+					break;
 			}
 		}
+
+		const PhysicsServer3D::AreaSpaceOverrideMode linear_mode = area->get_linear_damp_mode();
+		if (!linear_done && linear_mode != PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED) {
+			const real_t damp = area->get_linear_damp();
+			switch (linear_mode) {
+				case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE:
+					result.linear_damp += damp;
+					break;
+				case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE_REPLACE:
+					result.linear_damp += damp;
+					linear_done = true;
+					break;
+				case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE:
+					result.linear_damp = damp;
+					linear_done = true;
+					break;
+				case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE_COMBINE:
+					result.linear_damp = damp;
+					break;
+				default:
+					break;
+			}
+		}
+
+		const PhysicsServer3D::AreaSpaceOverrideMode angular_mode = area->get_angular_damp_mode();
+		if (!angular_done && angular_mode != PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED) {
+			const real_t damp = area->get_angular_damp();
+			switch (angular_mode) {
+				case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE:
+					result.angular_damp += damp;
+					break;
+				case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE_REPLACE:
+					result.angular_damp += damp;
+					angular_done = true;
+					break;
+				case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE:
+					result.angular_damp = damp;
+					angular_done = true;
+					break;
+				case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE_COMBINE:
+					result.angular_damp = damp;
+					break;
+				default:
+					break;
+			}
+		}
+	}
+
+	return result;
+}
+
+void Box3DSpace3D::_apply_area_overrides() {
+	for (Box3DBodyImpl3D* body : bodies) {
+		if (!body->has_body_id() || body->is_omitting_force_integration()) {
+			continue;
+		}
+
+		const AreaOverrides overrides = compute_area_overrides(body);
+
+		b3Body_SetLinearDamping(body->get_body_id(), (float)overrides.linear_damp);
+		b3Body_SetAngularDamping(body->get_body_id(), (float)overrides.angular_damp);
+
+		if (!overrides.affects_gravity) {
+			b3Body_SetGravityScale(body->get_body_id(), (float)body->get_gravity_scale());
+			continue;
+		}
+
+		// Box3D has no per-body gravity vector, so contribute the area gravity as an
+		// equivalent velocity delta. A force would divide by mass and damp differently.
+		const float world_scale = overrides.replaces_world_gravity ? 0.0f : (float)body->get_gravity_scale();
+		b3Body_SetGravityScale(body->get_body_id(), world_scale);
+		const Vector3 delta = overrides.gravity * body->get_gravity_scale() * last_step;
+		const b3Vec3 velocity = b3Body_GetLinearVelocity(body->get_body_id());
+		b3Body_SetLinearVelocity(body->get_body_id(), b3Add(velocity, godot_to_b3(delta)));
 	}
 }
 
@@ -169,9 +256,7 @@ void Box3DSpace3D::_pull_body_events() {
 		if (body == nullptr || !body->get_state_sync_callback().is_valid()) {
 			continue;
 		}
-		PendingStateSync sync;
-		sync.body = body;
-		pending_state_syncs.push_back(sync);
+		body->set_needs_state_sync(true);
 	}
 }
 
@@ -243,20 +328,62 @@ void Box3DSpace3D::_queue_area_event(
 	}
 }
 
+// Mirrors GodotBody3D::call_queries: force integration then state sync, back to back, so a
+// node that applies forces from its state-sync callback has them picked up by the next step.
+void Box3DSpace3D::_call_body_queries() {
+	LocalVector<RID> body_rids;
+	body_rids.reserve(bodies.size());
+	for (Box3DBodyImpl3D* body : bodies) {
+		body_rids.push_back(body->get_rid());
+	}
+
+	// Callbacks may detach or free bodies, so re-resolve each RID instead of holding a
+	// pointer across the call.
+	for (const RID& body_rid : body_rids) {
+		Box3DBodyImpl3D* body = Box3DPhysicsServer3D::get_singleton()->get_body(body_rid);
+		if (body == nullptr || body->get_space() != this) {
+			continue;
+		}
+
+		const Callable integration_callback = body->get_force_integration_callback();
+		if (integration_callback.is_valid()) {
+			const Variant userdata = body->get_force_integration_userdata();
+			Array arguments;
+			if (userdata.get_type() == Variant::NIL) {
+				arguments.resize(1);
+				arguments[0] = body->get_direct_state_or_null();
+			} else {
+				arguments.resize(2);
+				arguments[0] = body->get_direct_state_or_null();
+				arguments[1] = userdata;
+			}
+			integration_callback.callv(arguments);
+		}
+
+		body = Box3DPhysicsServer3D::get_singleton()->get_body(body_rid);
+		if (body == nullptr || body->get_space() != this) {
+			continue;
+		}
+		// Godot syncs every awake body, not just ones Box3D reported as moved: nodes like
+		// VehicleBody3D drive themselves from this callback and would never start moving.
+		if (body->is_sleeping() && !body->needs_state_sync()) {
+			continue;
+		}
+		const Callable sync_callback = body->get_state_sync_callback();
+		if (sync_callback.is_valid()) {
+			Array arguments;
+			arguments.resize(1);
+			arguments[0] = body->get_direct_state_or_null();
+			sync_callback.callv(arguments);
+		}
+		body->set_needs_state_sync(false);
+	}
+}
+
 void Box3DSpace3D::flush_queries() {
 	flushing_queries = true;
 
-	for (const PendingStateSync& sync : pending_state_syncs) {
-		Box3DPhysicsDirectBodyState3D* state = sync.body->get_direct_state_or_null();
-		if (state == nullptr) {
-			continue;
-		}
-		Array arguments;
-		arguments.resize(1);
-		arguments[0] = state;
-		sync.body->get_state_sync_callback().callv(arguments);
-	}
-	pending_state_syncs.clear();
+	_call_body_queries();
 
 	for (const PendingAreaEvent& event : pending_area_events) {
 		Array arguments;

@@ -2,6 +2,7 @@
 
 #include "../misc/type_conversions.hpp"
 
+#include <godot_cpp/classes/physics_direct_space_state3d_extension.hpp>
 #include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/rid.hpp>
 
@@ -16,6 +17,7 @@ using namespace godot;
 struct Box3DQueryFilter3D {
 	b3QueryFilter filter = godot_to_b3_query_filter(UINT32_MAX);
 	HashSet<RID> exclude;
+	const PhysicsDirectSpaceState3DExtension* direct_state = nullptr;
 	bool collide_with_bodies = true;
 	bool collide_with_areas = false;
 
@@ -28,5 +30,7 @@ struct Box3DQueryFilter3D {
 
 	void set_collision_mask(uint32_t p_collision_mask) { filter = godot_to_b3_query_filter(p_collision_mask); }
 
-	bool should_exclude(const RID& p_rid) const { return exclude.has(p_rid); }
+	bool should_exclude(const RID& p_rid) const {
+		return exclude.has(p_rid) || (direct_state != nullptr && direct_state->is_body_excluded_from_query(p_rid));
+	}
 };

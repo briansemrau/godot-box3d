@@ -41,6 +41,15 @@ public:
 	void set_user_data(const Variant& p_data) { user_data = p_data; }
 
 	Variant get_user_data() const { return user_data; }
+	
+	const Transform3D& get_local_frame_a() const { return local_frame_a; }
+
+	const Transform3D& get_local_frame_b() const { return local_frame_b; }
+
+	// Applied to the live joint without rebuilding, so the solver keeps its warm start.
+	void set_local_frame_a(const Transform3D& p_frame);
+
+	void set_local_frame_b(const Transform3D& p_frame);
 
 	// Called by the server once both bodies (or either body's space attachment) may have
 	// changed, to (re)build the live b3JointId if both bodies now have a b3BodyId.

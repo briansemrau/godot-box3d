@@ -83,17 +83,27 @@ public:
 	// call_deferred).
 	void flush_queries();
 
-private:
-	struct PendingStateSync {
-		Box3DBodyImpl3D* body = nullptr;
+	struct AreaOverrides {
+		// Area contribution only; world gravity is added on top unless replaces_world is set.
+		Vector3 gravity;
+		real_t linear_damp = 0.0;
+		real_t angular_damp = 0.0;
+		bool affects_gravity = false;
+		bool replaces_world_gravity = false;
 	};
 
+	// Resolves the areas overlapping a body into the gravity and damping it should feel.
+	AreaOverrides compute_area_overrides(Box3DBodyImpl3D* p_body) const;
+
+private:
 	struct PendingAreaEvent {
 		Callable callback;
 		PhysicsServer3D::AreaBodyStatus status = PhysicsServer3D::AREA_BODY_ADDED;
 		RID other_rid;
 		uint64_t other_instance_id = 0;
 	};
+
+	void _call_body_queries();
 
 	void _apply_area_overrides();
 
@@ -114,7 +124,6 @@ private:
 	HashSet<Box3DBodyImpl3D*> bodies;
 	HashSet<Box3DAreaImpl3D*> areas;
 
-	LocalVector<PendingStateSync> pending_state_syncs;
 	LocalVector<PendingAreaEvent> pending_area_events;
 
 	float last_step = 0.0f;

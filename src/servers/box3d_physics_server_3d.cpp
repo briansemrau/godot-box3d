@@ -2,6 +2,7 @@
 
 #include "../joints/box3d_hinge_joint_impl_3d.hpp"
 #include "../joints/box3d_joint_impl_3d.hpp"
+#include "../joints/box3d_filter_joint_impl_3d.hpp"
 #include "../joints/box3d_pin_joint_impl_3d.hpp"
 #include "../joints/box3d_slider_joint_impl_3d.hpp"
 #include "../misc/type_conversions.hpp"
@@ -13,6 +14,7 @@
 #include "../shapes/box3d_capsule_shape_impl_3d.hpp"
 #include "../shapes/box3d_concave_polygon_shape_impl_3d.hpp"
 #include "../shapes/box3d_convex_polygon_shape_impl_3d.hpp"
+#include "../shapes/box3d_cylinder_shape_impl_3d.hpp"
 #include "../shapes/box3d_heightmap_shape_impl_3d.hpp"
 #include "../shapes/box3d_shape_impl_3d.hpp"
 #include "../shapes/box3d_sphere_shape_impl_3d.hpp"
@@ -42,6 +44,37 @@ Box3DShapedObjectImpl3D* Box3DPhysicsServer3D::get_shaped_object(const RID& p_ri
 		return area;
 	}
 	return nullptr;
+}
+
+void Box3DPhysicsServer3D::_clear_collision_exceptions(Box3DBodyImpl3D* p_body) {
+	for (const KeyValue<RID, Box3DFilterJointImpl3D*>& entry : p_body->get_collision_exceptions()) {
+		memdelete(entry.value);
+	}
+	p_body->get_collision_exceptions().clear();
+
+	// Exceptions are stored one-sided, so other bodies may still reference this one.
+	const RID rid = p_body->get_rid();
+	for (Box3DBodyImpl3D* other : bodies_with_exceptions) {
+		if (other == p_body) {
+			continue;
+		}
+		HashMap<RID, Box3DFilterJointImpl3D*>::Iterator entry = other->get_collision_exceptions().find(rid);
+		if (entry) {
+			memdelete(entry->value);
+			other->get_collision_exceptions().remove(entry);
+		}
+	}
+	bodies_with_exceptions.erase(p_body);
+}
+
+RID Box3DPhysicsServer3D::_resolve_area_rid(const RID& p_rid) const {
+	const Box3DSpace3D* space = space_owner.get_or_null(p_rid);
+	if (space == nullptr) {
+		return p_rid;
+	}
+	const Box3DAreaImpl3D* default_area = space->get_default_area();
+	ERR_FAIL_NULL_V(default_area, p_rid);
+	return default_area->get_rid();
 }
 
 // --- Shapes ---
@@ -79,7 +112,10 @@ RID Box3DPhysicsServer3D::_capsule_shape_create() {
 }
 
 RID Box3DPhysicsServer3D::_cylinder_shape_create() {
-	ERR_FAIL_V_MSG(RID(), "Box3D: CylinderShape3D is not supported in this version of the Box3D extension.");
+	auto* shape = memnew(Box3DCylinderShapeImpl3D);
+	const RID rid = shape_owner.make_rid(shape);
+	shape->set_rid(rid);
+	return rid;
 }
 
 RID Box3DPhysicsServer3D::_convex_polygon_shape_create() {
@@ -303,67 +339,67 @@ void Box3DPhysicsServer3D::_area_clear_shapes(const RID& p_area) {
 }
 
 void Box3DPhysicsServer3D::_area_attach_object_instance_id(const RID& p_area, uint64_t p_id) {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL(area);
 	area->set_instance_id(p_id);
 }
 
 uint64_t Box3DPhysicsServer3D::_area_get_object_instance_id(const RID& p_area) const {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL_V(area, 0);
 	return area->get_instance_id();
 }
 
 void Box3DPhysicsServer3D::_area_set_param(const RID& p_area, PhysicsServer3D::AreaParameter p_param, const Variant& p_value) {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL(area);
 	area->set_param(p_param, p_value);
 }
 
 void Box3DPhysicsServer3D::_area_set_transform(const RID& p_area, const Transform3D& p_transform) {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL(area);
 	area->set_transform(p_transform);
 }
 
 Variant Box3DPhysicsServer3D::_area_get_param(const RID& p_area, PhysicsServer3D::AreaParameter p_param) const {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL_V(area, Variant());
 	return area->get_param(p_param);
 }
 
 Transform3D Box3DPhysicsServer3D::_area_get_transform(const RID& p_area) const {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL_V(area, Transform3D());
 	return area->get_transform();
 }
 
 void Box3DPhysicsServer3D::_area_set_collision_layer(const RID& p_area, uint32_t p_layer) {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL(area);
 	area->set_collision_layer(p_layer);
 }
 
 uint32_t Box3DPhysicsServer3D::_area_get_collision_layer(const RID& p_area) const {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL_V(area, 0);
 	return area->get_collision_layer();
 }
 
 void Box3DPhysicsServer3D::_area_set_collision_mask(const RID& p_area, uint32_t p_mask) {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL(area);
 	area->set_collision_mask(p_mask);
 }
 
 uint32_t Box3DPhysicsServer3D::_area_get_collision_mask(const RID& p_area) const {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL_V(area, 0);
 	return area->get_collision_mask();
 }
 
 void Box3DPhysicsServer3D::_area_set_monitorable(const RID& p_area, bool p_monitorable) {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL(area);
 	area->set_monitorable(p_monitorable);
 }
@@ -373,13 +409,13 @@ void Box3DPhysicsServer3D::_area_set_ray_pickable(const RID& p_area, bool p_enab
 }
 
 void Box3DPhysicsServer3D::_area_set_monitor_callback(const RID& p_area, const Callable& p_callback) {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL(area);
 	area->set_body_monitor_callback(p_callback);
 }
 
 void Box3DPhysicsServer3D::_area_set_area_monitor_callback(const RID& p_area, const Callable& p_callback) {
-	Box3DAreaImpl3D* area = area_owner.get_or_null(p_area);
+	Box3DAreaImpl3D* area = area_owner.get_or_null(_resolve_area_rid(p_area));
 	ERR_FAIL_NULL(area);
 	area->set_area_monitor_callback(p_callback);
 }
@@ -768,17 +804,52 @@ bool Box3DPhysicsServer3D::_body_is_axis_locked(const RID& p_body, PhysicsServer
 }
 
 void Box3DPhysicsServer3D::_body_add_collision_exception(const RID& p_body, const RID& p_excepted_body) {
-	// v1: full per-pair collision exception lists are a non-goal. The common single-group
-	// case is handled via b3Filter.groupIndex instead (see the plan's Non-goals section).
-	WARN_PRINT_ONCE("Box3D: per-pair collision exceptions are not implemented in this version; use collision layers/masks instead.");
+	Box3DBodyImpl3D* body = body_owner.get_or_null(p_body);
+	Box3DBodyImpl3D* excepted = body_owner.get_or_null(p_excepted_body);
+	ERR_FAIL_NULL(body);
+	ERR_FAIL_NULL(excepted);
+	ERR_FAIL_COND(body == excepted);
+	if (body->get_collision_exceptions().has(p_excepted_body)) {
+		return;
+	}
+
+	auto* joint = memnew(Box3DFilterJointImpl3D(body, excepted));
+	joint->rebuild();
+
+	// Godot records the exception on the requesting body only, matching GodotBody3D, even
+	// though the filter joint it backs stops collision in both directions.
+	body->get_collision_exceptions().insert(p_excepted_body, joint);
+	bodies_with_exceptions.insert(body);
 }
 
 void Box3DPhysicsServer3D::_body_remove_collision_exception(const RID& p_body, const RID& p_excepted_body) {
-	// See _body_add_collision_exception.
+	Box3DBodyImpl3D* body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL(body);
+
+	HashMap<RID, Box3DFilterJointImpl3D*>::Iterator entry = body->get_collision_exceptions().find(p_excepted_body);
+	if (!entry) {
+		return;
+	}
+	Box3DFilterJointImpl3D* joint = entry->value;
+	body->get_collision_exceptions().remove(entry);
+	// Re-enabling first makes Box3D re-query the broad-phase, so a pair that is already
+	// overlapping regains a contact instead of staying interpenetrated.
+	joint->set_collision_disabled(false);
+	memdelete(joint);
+
+	if (body->get_collision_exceptions().is_empty()) {
+		bodies_with_exceptions.erase(body);
+	}
 }
 
 TypedArray<RID> Box3DPhysicsServer3D::_body_get_collision_exceptions(const RID& p_body) const {
-	return TypedArray<RID>();
+	TypedArray<RID> exceptions;
+	Box3DBodyImpl3D* body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(body, exceptions);
+	for (const KeyValue<RID, Box3DFilterJointImpl3D*>& entry : body->get_collision_exceptions()) {
+		exceptions.push_back(entry.key);
+	}
+	return exceptions;
 }
 
 void Box3DPhysicsServer3D::_body_set_max_contacts_reported(const RID& p_body, int32_t p_amount) {
@@ -900,19 +971,38 @@ double Box3DPhysicsServer3D::_pin_joint_get_param(const RID& p_joint, PhysicsSer
 }
 
 void Box3DPhysicsServer3D::_pin_joint_set_local_a(const RID& p_joint, const Vector3& p_local_a) {
-	WARN_PRINT_ONCE("Box3D: changing a PinJoint3D's local anchor after creation is not supported; recreate the joint instead.");
+	auto* joint = dynamic_cast<Box3DPinJointImpl3D*>(joint_owner.get_or_null(p_joint));
+	// PinJoint3D writes its anchors before naming its bodies, so the joint may not exist
+	// yet; _joint_make_pin receives the same anchors and applies them.
+	if (joint == nullptr) {
+		return;
+	}
+	joint->set_local_frame_a(Transform3D(joint->get_local_frame_a().basis, p_local_a));
 }
 
 Vector3 Box3DPhysicsServer3D::_pin_joint_get_local_a(const RID& p_joint) const {
-	return Vector3();
+	auto* joint = dynamic_cast<Box3DPinJointImpl3D*>(joint_owner.get_or_null(p_joint));
+	if (joint == nullptr) {
+		return Vector3();
+	}
+	return joint->get_local_frame_a().origin;
 }
 
 void Box3DPhysicsServer3D::_pin_joint_set_local_b(const RID& p_joint, const Vector3& p_local_b) {
-	WARN_PRINT_ONCE("Box3D: changing a PinJoint3D's local anchor after creation is not supported; recreate the joint instead.");
+	auto* joint = dynamic_cast<Box3DPinJointImpl3D*>(joint_owner.get_or_null(p_joint));
+	// See _pin_joint_set_local_a.
+	if (joint == nullptr) {
+		return;
+	}
+	joint->set_local_frame_b(Transform3D(joint->get_local_frame_b().basis, p_local_b));
 }
 
 Vector3 Box3DPhysicsServer3D::_pin_joint_get_local_b(const RID& p_joint) const {
-	return Vector3();
+	auto* joint = dynamic_cast<Box3DPinJointImpl3D*>(joint_owner.get_or_null(p_joint));
+	if (joint == nullptr) {
+		return Vector3();
+	}
+	return joint->get_local_frame_b().origin;
 }
 
 void Box3DPhysicsServer3D::_joint_make_hinge(const RID& p_joint, const RID& p_body_a, const Transform3D& p_hinge_a, const RID& p_body_b, const Transform3D& p_hinge_b) {
@@ -1021,7 +1111,7 @@ double Box3DPhysicsServer3D::_cone_twist_joint_get_param(const RID& p_joint, Phy
 }
 
 void Box3DPhysicsServer3D::_joint_make_generic_6dof(const RID& p_joint, const RID& p_body_a, const Transform3D& p_local_ref_a, const RID& p_body_b, const Transform3D& p_local_ref_b) {
-	ERR_FAIL_MSG("Box3D: Generic6DOFJoint3D is not supported in this version of the Box3D extension.");
+	ERR_FAIL_MSG("Box3D: Generic6DOFJoint3D is not supported; use PinJoint3D, HingeJoint3D, or SliderJoint3D instead.");
 }
 
 void Box3DPhysicsServer3D::_generic_6dof_joint_set_param(const RID& p_joint, Vector3::Axis p_axis, PhysicsServer3D::G6DOFJointAxisParam p_param, double p_value) {
@@ -1190,13 +1280,18 @@ bool Box3DPhysicsServer3D::_soft_body_is_point_pinned(const RID& p_body, int32_t
 void Box3DPhysicsServer3D::_free_rid(const RID& p_rid) {
 	// Joints and shapes free before bodies/areas that reference them; bodies/areas free
 	// before shapes they hold (mirrors JoltPhysicsServer3DExtension::_free_rid's ordering).
-	if (Box3DJointImpl3D* joint = joint_owner.get_or_null(p_rid)) {
-		memdelete(joint);
+	if (joint_owner.owns(p_rid)) {
+		if (Box3DJointImpl3D* joint = joint_owner.get_or_null(p_rid)) {
+			memdelete(joint);
+		}
+		// _joint_clear() keeps a null placeholder so the RID can be rebound.
+		// Free the owned RID even when no concrete joint remains.
 		joint_owner.free(p_rid);
 		return;
 	}
 
 	if (Box3DBodyImpl3D* body = body_owner.get_or_null(p_rid)) {
+		_clear_collision_exceptions(body);
 		if (Box3DSpace3D* space = body->get_space()) {
 			space->unregister_body(body);
 		}
@@ -1279,5 +1374,22 @@ bool Box3DPhysicsServer3D::_is_flushing_queries() const {
 }
 
 int32_t Box3DPhysicsServer3D::_get_process_info(PhysicsServer3D::ProcessInfo p_process_info) {
-	return 0;
+	int32_t total = 0;
+	for (const Box3DSpace3D* space : active_spaces) {
+		const b3Counters counters = b3World_GetCounters(space->get_world_id());
+		switch (p_process_info) {
+			case PhysicsServer3D::INFO_ACTIVE_OBJECTS:
+				total += counters.bodyCount;
+				break;
+			case PhysicsServer3D::INFO_COLLISION_PAIRS:
+				total += counters.contactCount;
+				break;
+			case PhysicsServer3D::INFO_ISLAND_COUNT:
+				total += counters.islandCount;
+				break;
+			default:
+				break;
+		}
+	}
+	return total;
 }

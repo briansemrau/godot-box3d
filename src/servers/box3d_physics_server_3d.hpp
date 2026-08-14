@@ -271,6 +271,12 @@ protected:
 	static void _bind_methods() {}
 
 private:
+	// Godot passes a space RID to the area API to reach that space's default area.
+	RID _resolve_area_rid(const RID& p_rid) const;
+
+	// Destroys every collision exception referencing a body, both directions.
+	void _clear_collision_exceptions(Box3DBodyImpl3D* p_body);
+
 	static Box3DPhysicsServer3D* singleton;
 
 	RID_PtrOwner<Box3DSpace3D> space_owner;
@@ -280,5 +286,7 @@ private:
 	RID_PtrOwner<Box3DJointImpl3D> joint_owner;
 
 	HashSet<Box3DSpace3D*> active_spaces;
+	// Narrows the reverse lookup when freeing a body, since exceptions are stored one-sided.
+	HashSet<Box3DBodyImpl3D*> bodies_with_exceptions;
 	bool active = true;
 };

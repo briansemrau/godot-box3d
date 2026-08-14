@@ -3,11 +3,28 @@
 #include "box3d_shaped_object_impl_3d.hpp"
 
 #include <godot_cpp/classes/physics_server3d.hpp>
+#include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/templates/local_vector.hpp>
 #include <godot_cpp/variant/callable.hpp>
+
+#include <box3d/types.h>
 
 using namespace godot;
 
+class Box3DFilterJointImpl3D;
 class Box3DPhysicsDirectBodyState3D;
+
+// One Godot contact point, flattened from a Box3D manifold point.
+struct Box3DContactPoint3D {
+	Vector3 local_position;
+	Vector3 local_normal;
+	Vector3 impulse;
+	Vector3 local_velocity;
+	Vector3 collider_position;
+	Vector3 collider_velocity;
+	RID collider_rid;
+	uint64_t collider_instance_id = 0;
+};
 
 // RigidBody-facing wrapper: static/kinematic/dynamic bodies. Box3D requires a valid world
 // before a body can be created, so construction of the b3BodyId is deferred until
@@ -129,6 +146,10 @@ public:
 	// standard force integration is enabled, then clear the transient accumulators.
 	void pre_step();
 
+	bool needs_state_sync() const { return state_sync_pending; }
+
+	void set_needs_state_sync(bool p_needed) { state_sync_pending = p_needed; }
+
 	void set_state_sync_callback(const Callable& p_callable) { state_sync_callback = p_callable; }
 
 	const Callable& get_state_sync_callback() const { return state_sync_callback; }
@@ -146,9 +167,15 @@ public:
 
 	void set_max_contacts_reported(int32_t p_count) { max_contacts_reported = p_count; }
 
-	bool is_contact_monitor_enabled() const { return contact_monitor_enabled; }
+	// Bodies this one is excepted from colliding with, keyed by RID.
+	HashMap<RID, Box3DFilterJointImpl3D*>& get_collision_exceptions() { return collision_exceptions; }
 
-	void set_contact_monitor_enabled(bool p_enabled) { contact_monitor_enabled = p_enabled; }
+	const HashMap<RID, Box3DFilterJointImpl3D*>& get_collision_exceptions() const { return collision_exceptions; }
+
+	// Rebuilds the contact cache; manifold pointers are only valid until the next step.
+	void refresh_contacts();
+
+	const LocalVector<Box3DContactPoint3D>& get_contacts() const { return contacts; }
 
 protected:
 	b3BodyId _create_body_id(b3WorldId p_world_id) override;
@@ -200,11 +227,18 @@ private:
 	Vector3 applied_torque;
 
 	Callable state_sync_callback;
+	bool state_sync_pending = false;
 	Callable force_integration_callback;
 	Variant force_integration_userdata;
 
 	int32_t max_contacts_reported = 0;
-	bool contact_monitor_enabled = false;
+
+	LocalVector<Box3DContactPoint3D> contacts;
+	// Reused every step so contact polling does not allocate in the physics loop.
+	LocalVector<b3ContactData> contact_pairs;
+
+	// Both bodies in a pair hold the same joint pointer; the server owns and frees it once.
+	HashMap<RID, Box3DFilterJointImpl3D*> collision_exceptions;
 
 	Box3DPhysicsDirectBodyState3D* direct_state = nullptr;
 };

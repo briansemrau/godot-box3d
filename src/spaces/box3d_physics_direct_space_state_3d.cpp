@@ -60,6 +60,59 @@ bool overlap_result_fcn(b3ShapeId p_shape_id, void* p_context) {
 	return true;
 }
 
+struct CollideShapeContext {
+	const Box3DQueryFilter3D* filter = nullptr;
+	const b3ShapeProxy* query_proxy = nullptr;
+	Vector3* results = nullptr;
+	int32_t max_results = 0;
+	int32_t count = 0;
+};
+
+// Reports the closest points between the query shape and one overlapping shape. Godot wants
+// world-space pairs, and b3ShapeDistance runs in frame A, which is world space here because
+// Box3DShapeProxy3D already bakes the transform into its points.
+bool collide_shape_result_fcn(b3ShapeId p_shape_id, void* p_context) {
+	auto* ctx = static_cast<CollideShapeContext*>(p_context);
+	if (ctx->count >= ctx->max_results) {
+		return false;
+	}
+
+	const b3BodyId body_id = b3Shape_GetBody(p_shape_id);
+	Box3DShapedObjectImpl3D* object = nullptr;
+	if (!should_report(b3Body_GetUserData(body_id), *ctx->filter, object)) {
+		return true;
+	}
+
+	const Transform3D object_transform = object->get_transform();
+	for (int32_t i = 0; i < object->get_shape_count(); i++) {
+		if (!object->has_shape_id(i) || !B3_ID_EQUALS(object->get_shape_id(i), p_shape_id)) {
+			continue;
+		}
+
+		const Box3DShapeProxy3D other_proxy(object->get_shape(i), object_transform * object->get_shape_transform(i));
+		if (!other_proxy.is_supported()) {
+			return true;
+		}
+
+		b3DistanceInput input{};
+		input.proxyA = *ctx->query_proxy;
+		input.proxyB = other_proxy.get_proxy();
+		input.transform = b3Transform_identity;
+		input.useRadii = true;
+
+		b3SimplexCache cache{};
+		const b3DistanceOutput output = b3ShapeDistance(&input, &cache, nullptr, 0);
+
+		// GJK cannot recover penetration depth, so an overlapping pair reports its witness
+		// point for both sides rather than a fabricated depth.
+		ctx->results[ctx->count * 2 + 0] = b3_to_godot(output.pointA);
+		ctx->results[ctx->count * 2 + 1] = b3_to_godot(output.pointB);
+		ctx->count++;
+		return true;
+	}
+	return true;
+}
+
 struct RayContext {
 	const Box3DQueryFilter3D* filter = nullptr;
 	bool hit_from_inside = false;
@@ -102,6 +155,7 @@ bool Box3DPhysicsDirectSpaceState3D::_intersect_ray(
 	ERR_FAIL_NULL_V(space, false);
 
 	Box3DQueryFilter3D filter(p_collision_mask, p_collide_with_bodies, p_collide_with_areas);
+	filter.direct_state = this;
 
 	RayContext context;
 	context.filter = &filter;
@@ -140,6 +194,7 @@ int32_t Box3DPhysicsDirectSpaceState3D::_intersect_point(
 	ERR_FAIL_NULL_V(space, 0);
 
 	Box3DQueryFilter3D filter(p_collision_mask, p_collide_with_bodies, p_collide_with_areas);
+	filter.direct_state = this;
 
 	const b3Vec3 point = godot_to_b3(p_position);
 	b3ShapeProxy proxy;
@@ -178,6 +233,7 @@ int32_t Box3DPhysicsDirectSpaceState3D::_intersect_shape(
 	}
 
 	Box3DQueryFilter3D filter(p_collision_mask, p_collide_with_bodies, p_collide_with_areas);
+	filter.direct_state = this;
 
 	OverlapContext context;
 	context.filter = &filter;
@@ -213,6 +269,7 @@ bool Box3DPhysicsDirectSpaceState3D::_cast_motion(
 	}
 
 	Box3DQueryFilter3D filter(p_collision_mask, p_collide_with_bodies, p_collide_with_areas);
+	filter.direct_state = this;
 
 	RayContext context;
 	context.filter = &filter;
@@ -241,10 +298,34 @@ bool Box3DPhysicsDirectSpaceState3D::_collide_shape(
 		void* p_results,
 		int32_t p_max_results,
 		int32_t* p_result_count) {
-	// v1 does not implement contact-manifold-level shape collision (only overlap/ray/cast
-	// queries); PhysicsServer3D::collide_shape() will report no collisions.
 	*p_result_count = 0;
-	return false;
+	ERR_FAIL_NULL_V(space, false);
+	if (p_max_results <= 0) {
+		return false;
+	}
+
+	Box3DShapeImpl3D* shape = Box3DPhysicsServer3D::get_singleton()->get_shape(p_shape_rid);
+	ERR_FAIL_NULL_V(shape, false);
+
+	const Box3DShapeProxy3D shape_proxy(shape, p_transform);
+	if (!shape_proxy.is_supported()) {
+		return false;
+	}
+
+	Box3DQueryFilter3D filter(p_collision_mask, p_collide_with_bodies, p_collide_with_areas);
+	filter.direct_state = this;
+
+	CollideShapeContext context;
+	context.filter = &filter;
+	context.query_proxy = &shape_proxy.get_proxy();
+	context.results = static_cast<Vector3*>(p_results);
+	context.max_results = p_max_results;
+
+	b3World_OverlapShape(
+			space->get_world_id(), b3Vec3_zero, &shape_proxy.get_proxy(), filter.filter, collide_shape_result_fcn, &context);
+
+	*p_result_count = context.count;
+	return context.count > 0;
 }
 
 bool Box3DPhysicsDirectSpaceState3D::_rest_info(
@@ -267,6 +348,7 @@ bool Box3DPhysicsDirectSpaceState3D::_rest_info(
 	}
 
 	Box3DQueryFilter3D filter(p_collision_mask, p_collide_with_bodies, p_collide_with_areas);
+	filter.direct_state = this;
 
 	RayContext context;
 	context.filter = &filter;

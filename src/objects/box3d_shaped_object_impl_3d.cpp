@@ -5,6 +5,7 @@
 #include "../shapes/box3d_capsule_shape_impl_3d.hpp"
 #include "../shapes/box3d_concave_polygon_shape_impl_3d.hpp"
 #include "../shapes/box3d_convex_polygon_shape_impl_3d.hpp"
+#include "../shapes/box3d_cylinder_shape_impl_3d.hpp"
 #include "../shapes/box3d_heightmap_shape_impl_3d.hpp"
 #include "../shapes/box3d_shape_impl_3d.hpp"
 #include "../shapes/box3d_sphere_shape_impl_3d.hpp"
@@ -34,15 +35,15 @@ b3ShapeId create_box3d_shape(
 		return b3_nullShapeId;
 	}
 
+	const PhysicsServer3D::ShapeType type = shape->get_type();
+	const bool is_concave = (type == PhysicsServer3D::SHAPE_CONCAVE_POLYGON || type == PhysicsServer3D::SHAPE_HEIGHTMAP);
+
 	b3ShapeDef def = b3DefaultShapeDef();
 	def.userData = p_user_data;
 	def.filter = godot_to_b3_filter(p_layer, p_mask);
 	def.isSensor = p_is_sensor;
-	// Box3D requires *both* sides of a sensor overlap to opt into sensor events (see
-	// b3ShapeDef::enableSensorEvents doc comment: "This applies to sensors and
-	// non-sensors."), so every shape enables it, not just the sensor side, or Godot's
-	// Area3D body_entered/body_exited would never fire.
-	def.enableSensorEvents = true;
+	// A concave shape may be a sensor, but never a sensor visitor (Box3D can't proxy it).
+	def.enableSensorEvents = p_is_sensor || !is_concave;
 	def.enableContactEvents = !p_is_sensor;
 	def.density = 1.0f;
 	def.baseMaterial = b3DefaultSurfaceMaterial();
@@ -50,7 +51,6 @@ b3ShapeId create_box3d_shape(
 	def.baseMaterial.restitution = p_restitution;
 
 	const Transform3D& local = p_instance.get_transform();
-	const PhysicsServer3D::ShapeType type = shape->get_type();
 
 	switch (type) {
 		case PhysicsServer3D::SHAPE_SPHERE: {
@@ -83,6 +83,21 @@ b3ShapeId create_box3d_shape(
 			return b3CreateHullShape(p_body_id, &def, &box_hull.base);
 		}
 
+		case PhysicsServer3D::SHAPE_CYLINDER: {
+			auto* cylinder_shape = static_cast<Box3DCylinderShapeImpl3D*>(shape);
+			const float height = (float)cylinder_shape->get_height();
+			b3HullData* cylinder = b3CreateCylinder(
+					height,
+					(float)cylinder_shape->get_radius(),
+					-0.5f * height,
+					Box3DCylinderShapeImpl3D::HULL_SIDES);
+			ERR_FAIL_NULL_V(cylinder, b3_nullShapeId);
+			const b3Transform cylinder_transform = godot_to_b3_transform(local);
+			const b3ShapeId shape_id = b3CreateTransformedHullShape(p_body_id, &def, cylinder, cylinder_transform, b3Vec3{1.0f, 1.0f, 1.0f});
+			b3DestroyHull(cylinder);
+			return shape_id;
+		}
+
 		case PhysicsServer3D::SHAPE_CONVEX_POLYGON: {
 			auto* convex_shape = static_cast<Box3DConvexPolygonShapeImpl3D*>(shape);
 			const b3HullData* hull = convex_shape->get_hull();
@@ -98,12 +113,24 @@ b3ShapeId create_box3d_shape(
 
 		case PhysicsServer3D::SHAPE_CONCAVE_POLYGON: {
 			auto* mesh_shape = static_cast<Box3DConcavePolygonShapeImpl3D*>(shape);
-			const b3MeshData* mesh = mesh_shape->get_mesh();
-			if (mesh == nullptr) {
+			def.invokeContactCreation = true;
+
+			// b3CreateMeshShape takes no transform, so an offset or rotated instance needs
+			// its own mesh with the local transform baked into the vertices.
+			if (local.origin == Vector3() && local.basis.is_equal_approx(Basis())) {
+				const b3MeshData* mesh = mesh_shape->get_mesh();
+				if (mesh == nullptr) {
+					return b3_nullShapeId;
+				}
+				return b3CreateMeshShape(p_body_id, &def, mesh, b3Vec3{1.0f, 1.0f, 1.0f});
+			}
+
+			b3MeshData* baked = Box3DConcavePolygonShapeImpl3D::build_mesh(mesh_shape->get_faces(), local);
+			if (baked == nullptr) {
 				return b3_nullShapeId;
 			}
-			def.invokeContactCreation = true;
-			return b3CreateMeshShape(p_body_id, &def, mesh, b3Vec3{1.0f, 1.0f, 1.0f});
+			p_instance.set_owned_mesh(baked);
+			return b3CreateMeshShape(p_body_id, &def, baked, b3Vec3{1.0f, 1.0f, 1.0f});
 		}
 
 		case PhysicsServer3D::SHAPE_HEIGHTMAP: {
@@ -223,14 +250,19 @@ Box3DShapeImpl3D* Box3DShapedObjectImpl3D::get_shape(int32_t p_index) const {
 	return shapes[p_index].get_shape();
 }
 
+Transform3D Box3DShapedObjectImpl3D::get_shape_transform(int32_t p_index) const {
+	ERR_FAIL_INDEX_V(p_index, (int32_t)shapes.size(), Transform3D());
+	return shapes[p_index].get_transform();
+}
+
 b3ShapeId Box3DShapedObjectImpl3D::get_shape_id(int32_t p_index) const {
 	ERR_FAIL_INDEX_V(p_index, (int32_t)shapes.size(), b3_nullShapeId);
 	return shapes[p_index].get_shape_id();
 }
 
-Transform3D Box3DShapedObjectImpl3D::get_shape_transform(int32_t p_index) const {
-	ERR_FAIL_INDEX_V(p_index, (int32_t)shapes.size(), Transform3D());
-	return shapes[p_index].get_transform();
+bool Box3DShapedObjectImpl3D::has_shape_id(int32_t p_index) const {
+	ERR_FAIL_INDEX_V(p_index, (int32_t)shapes.size(), false);
+	return shapes[p_index].has_shape_id();
 }
 
 void Box3DShapedObjectImpl3D::set_shape_transform(int32_t p_index, const Transform3D& p_transform) {
@@ -319,5 +351,10 @@ void Box3DShapedObjectImpl3D::_destroy_shape_instance(Box3DShapeInstance3D& p_in
 	if (p_instance.has_shape_id()) {
 		b3DestroyShape(p_instance.get_shape_id(), true);
 		p_instance.set_shape_id(b3_nullShapeId);
+	}
+	// Box3D keeps a pointer to mesh data, so free the baked copy only after the shape.
+	if (p_instance.get_owned_mesh() != nullptr) {
+		b3DestroyMesh(p_instance.get_owned_mesh());
+		p_instance.set_owned_mesh(nullptr);
 	}
 }
