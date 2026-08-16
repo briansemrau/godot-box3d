@@ -17,6 +17,7 @@ from array_emit import (
 from classification import blob_structs
 from config import load_config
 from naming import (
+    godot_param_type,
     to_godot_name,
     to_godot_param_name,
     to_snake_case,
@@ -63,7 +64,7 @@ def generate_stub(func: Function, type_map: dict, blobs: set, data: dict) -> str
                 continue
         ptype = to_godot_type(p.type, type_map, qualified=False, is_pointer=p.pointer)
         pname = to_godot_param_name(p.name, i)
-        param_parts.append(f"{ptype} {pname}")
+        param_parts.append(f"{godot_param_type(ptype)} {pname}")
 
     lines = []
     call_args = []
@@ -208,7 +209,7 @@ def generate(funcs: list[Function], domain: str, type_map: dict, blobs: set, dat
         godot_name = to_godot_name(func.name)
 
         godot_params = get_godot_params(func, type_map, qualified=True)
-        param_parts = [f"{pt} {pn}" for pt, pn in godot_params]
+        param_parts = [f"{godot_param_type(pt)} {pn}" for pt, pn in godot_params]
         params_str = ", ".join(param_parts) if param_parts else ""
 
         array_return = get_array_return_type(func, type_map, qualified=True)
@@ -234,8 +235,8 @@ def generate(funcs: list[Function], domain: str, type_map: dict, blobs: set, dat
 
 
 def write_output(root: str, domains: dict, type_map: dict):
-    """Write generated files to src/bindings/."""
-    out = Path(root) / "src" / "bindings"
+    """Write generated files to src/api/bindings/."""
+    out = Path(root) / "src" / "api" / "bindings"
     out.mkdir(parents=True, exist_ok=True)
     # Sweep previously generated stub files so the output always matches the
     # current generator (data_classes/ is owned by data_class_generator.py).
@@ -257,20 +258,13 @@ def write_output(root: str, domains: dict, type_map: dict):
 
         impl_path = out / f"box3d_api_{domain}.gen.cpp"
         headers = [
-            f'#include "../api/box3d_api.hpp"\n',
-            f'#include "../api/box3d_api_helpers.hpp"\n',
-            f'#include "../misc/type_conversions.hpp"\n',
-            f'#include "../bindings/data_classes/data_classes.gen.hpp"\n',
+            f'#include "../box3d_api.hpp"\n',
+            f'#include "../box3d_api_helpers.hpp"\n',
+            f'#include "../../misc/type_conversions.hpp"\n',
+            f'#include "data_classes/data_classes.gen.hpp"\n',
         ]
-        domain_headers = {
-            "body": ['#include "../objects/box3d_body_impl_3d.hpp"\n'],
-            "shape": ['#include "../shapes/box3d_shape_instance_3d.hpp"\n', '#include "../objects/box3d_body_impl_3d.hpp"\n'],
-            "joint": ['#include "../joints/box3d_joint_impl_3d.hpp"\n', '#include "../objects/box3d_body_impl_3d.hpp"\n'],
-            "world": ['#include "../spaces/box3d_space_3d.hpp"\n'],
-            "contact": [],
-            "global": [],
-        }
-        headers.extend(domain_headers.get(domain, []))
+        domain_headers = type_map.get("domain_headers", {})
+        headers.extend(f'#include "{h}"\n' for h in domain_headers.get(domain, []))
         impl_path.write_text(
             "".join(headers) + "\n\n"
             f"{impl}\n"
@@ -289,7 +283,7 @@ def write_output(root: str, domains: dict, type_map: dict):
 
     reg_path = out / "box3d_api_register.gen.cpp"
     reg_lines = [
-        "#include \"../api/box3d_api.hpp\"",
+        "#include \"../box3d_api.hpp\"",
         "",
         "using namespace godot;",
         "",
@@ -333,7 +327,7 @@ def main():
         print(f"  {domain}: {len(funcs)} functions")
 
     write_output(args.root, domains, type_map)
-    print(f"\nOutput written to src/bindings/")
+    print(f"\nOutput written to src/api/bindings/")
 
 
 if __name__ == "__main__":

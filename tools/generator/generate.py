@@ -40,7 +40,7 @@ def main():
         from data_class_generator import generate_data_classes
 
         count, warnings = generate_data_classes(str(root))
-        print(f"Generated {count} data classes in src/bindings/data_classes/")
+        print(f"Generated {count} data classes in src/api/bindings/data_classes/")
         if warnings:
             print(f"  warnings: {len(warnings)}")
 
@@ -64,7 +64,7 @@ def main():
         for domain, funcs in sorted(domains.items()):
             print(f"  {domain}: {len(funcs)} functions")
         write_output(str(root), domains, type_map)
-        print(f"Output written to src/bindings/")
+        print(f"Output written to src/api/bindings/")
 
     if args.action in ("all", "docs"):
         from docs import generate_docs

@@ -7,7 +7,7 @@ test_project/.godot/
 /benchmark-video
 .cache/
 __pycache__/
-src/bindings/
+src/api/bindings/
 doc_classes/
 .DS_Store
 .venv/

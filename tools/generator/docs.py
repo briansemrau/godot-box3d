@@ -140,7 +140,7 @@ def generate_class_xml(functions: list[Function], type_map: dict) -> str:
     # Group methods by domain for organized output
     domains = {}
     for func in functions:
-        domain = classify_domain(func.name)
+        domain = classify_domain(func.name, rules=type_map.get("domain_rules"))
         domains.setdefault(domain, []).append(func)
 
     for domain in sorted(domains.keys()):

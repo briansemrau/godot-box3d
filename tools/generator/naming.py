@@ -40,6 +40,47 @@ PACKED_ARRAY_VARIANTS = {
 }
 
 
+# Godot types that are reference-counted wrappers and should be passed as
+# `const T &` in generated parameter lists (matching godot-cpp conventions).
+# POD value types (int, float, bool, Vector3, Transform3D, enums, ...) are
+# passed by value and never listed here.
+_CONST_REF_TYPES = {
+    "Array",
+    "Callable",
+    "Dictionary",
+    "NodePath",
+    "RID",
+    "Signal",
+    "String",
+    "StringName",
+    "Variant",
+}
+
+
+def is_const_ref_type(godot_type: str) -> bool:
+    """Whether a Godot type should be passed as `const T &` in a parameter list.
+
+    Handles godot:: qualification, Ref<T> / TypedArray<T> templates, and
+    Packed*Array containers. Value types return False.
+    """
+    t = godot_type
+    if t.startswith("godot::"):
+        t = t[len("godot::"):]
+    if t.startswith("Ref<") or t.startswith("TypedArray<") or t.startswith("Packed"):
+        return True
+    return t in _CONST_REF_TYPES
+
+
+def godot_param_type(godot_type: str) -> str:
+    """Format a Godot type for a parameter declaration.
+
+    Reference-counted types become `const T &`; value types stay bare.
+    """
+    if is_const_ref_type(godot_type):
+        return f"const {godot_type} &"
+    return godot_type
+
+
 def packed_array_type(scalar_type: str) -> str | None:
     """Return the Godot Packed*Array type for a C scalar element type, or None.
 

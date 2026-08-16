@@ -3,9 +3,9 @@
 Generates C++ GDExtension bindings and struct data classes for the Box3D C API,
 producing the static `Box3DAPI` class exposed to GDScript.
 
-- Binding methods → `src/bindings/box3d_api_*.gen.cpp` (+ `box3d_api_generated.gen.hpp`,
+- Binding methods → `src/api/bindings/box3d_api_*.gen.cpp` (+ `box3d_api_generated.gen.hpp`,
   `box3d_api_register.gen.cpp`)
-- Struct data classes → `src/bindings/data_classes/`
+- Struct data classes → `src/api/bindings/data_classes/`
 - Godot class reference XML → `doc_classes/` (embedded into the binary at build time)
 
 All generated output is gitignored and **swept before each run**, so what's on disk
@@ -64,13 +64,13 @@ It also verifies:
 
 ### `bindings`
 Parses the Box3D headers → generates `Box3DAPI` static method bindings →
-`src/bindings/`. Handles C-style array parameters (auto-detected direction/count,
+`src/api/bindings/`. Handles C-style array parameters (auto-detected direction/count,
 with overrides), output structs with internal arrays (collision manifolds), and
 owning RefCounted wrappers for heap-blob returns.
 
 ### `data_classes`
 Parses the Box3D headers → generates a `RefCounted` wrapper class per bindable
-struct → `src/bindings/data_classes/`. Embedded structs get typed getters/setters,
+struct → `src/api/bindings/data_classes/`. Embedded structs get typed getters/setters,
 `to_b3()`/`from_b3()`, and nested-view support; heap blobs (hull/mesh/heightfield/
 compound) get owning wrappers that free their allocation in the destructor.
 
@@ -99,6 +99,13 @@ All configuration is in `config.yaml`:
 - `math_types` — Box3D math types and their conversion function names
 - `array_params` — overrides for array parameters that auto-detection gets wrong
   (direction, count param/function, fixed counts, output structs with internal arrays)
+- `domain_rules` — ordered `[domain, pattern]` pairs used to classify every
+  function into a domain (audit display, generated file naming, docs grouping).
+  Matched top-to-bottom, first match wins; specific exceptions are listed first
+  so they beat the broad common-naming rules below them. Anything unmatched
+  falls into `other`
+- `domain_headers` — extra `#include`s per domain for generated
+  `box3d_api_{domain}.gen.cpp` files (helpers declared outside the base includes)
 
 **Philosophy**: the parser and classification do the heavy lifting; config only
 handles exceptions (blacklists).
@@ -131,8 +138,8 @@ Box3D C headers
     ├── classification.py  (decide generate vs. skip — shared with audit)
     ├── array_detection.py (detect C-style array params)
     ├── array_emit.py      (emit array-aware method bodies)
-    ├── binding_generator.py → src/bindings/box3d_api_*.gen.cpp (+ header + register)
-    ├── data_class_generator.py → src/bindings/data_classes/
+    ├── binding_generator.py → src/api/bindings/box3d_api_*.gen.cpp (+ header + register)
+    ├── data_class_generator.py → src/api/bindings/data_classes/
     ├── audit.py           → coverage report
     └── docs.py            → doc_classes/*.xml (embedded at build)
     ↓

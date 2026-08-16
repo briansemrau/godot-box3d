@@ -513,40 +513,19 @@ def parse_headers(root: str, headers: list[str] | None = None) -> dict:
 
 
 # --- Domain classification ---
-
-_DOMAIN_PATTERNS = {
-    "world": [r"^b3CreateWorld$", r"^b3DestroyWorld$", r"^b3GetWorld", r"^b3GetMaxWorld", r"^b3World_"],
-    "body": [r"^b3CreateBody$", r"^b3DestroyBody$", r"^b3Body_"],
-    "shape": [r"^b3Create\w*Shape$", r"^b3DestroyShape$", r"^b3Shape_"],
-    "joint": [r"^b3Create\w*Joint$", r"^b3DestroyJoint$", r"^b3Joint_", r"^b3\w*Joint_"],
-    "contact": [r"^b3Contact_"],
-    "recording": [r"^b3CreateRecording$", r"^b3DestroyRecording$", r"^b3Recording_",
-                  r"^b3SaveRecording", r"^b3LoadRecording", r"^b3ValidateReplay$", r"^b3RecPlayer_"],
-    "collision": [r"^b3DynamicTree_", r"^b3Overlap\w+", r"^b3RayCast\w+", r"^b3Cast\w+",
-                   r"^b3Collide\w+", r"^b3Compute\w+Mass$", r"^b3SolvePlanes$", r"^b3ClipVector$",
-                   r"^b3CreateHullData$", r"^b3DestroyHullData$", r"^b3CreateMeshData$",
-                   r"^b3DestroyMeshData$", r"^b3CreateHeightData$", r"^b3DestroyHeightData$",
-                   r"^b3CreateCompoundData$", r"^b3DestroyCompoundData$", r"^b3GetHull\w+",
-                   r"^b3GetMesh\w+", r"^b3GetHeight\w+", r"^b3GetCompound\w+",
-                   r"^b3DefaultSurfaceMaterial$"],
-    "global": [r"^b3GetVersion$", r"^b3IsDoublePrecision$", r"^b3SetAssertFcn$", r"^b3SetLogFcn$",
-               r"^b3GetByteCount$", r"^b3GetTicks$", r"^b3GetMilliseconds", r"^b3SetAllocator$",
-                r"^b3DefaultWorldDef$", r"^b3DefaultBodyDef$", r"^b3DefaultShapeDef$",
-                r"^b3DefaultFilter$", r"^b3DefaultQueryFilter$", r"^b3GetLengthUnitsPerMeter$",
-                r"^b3SetLengthUnitsPerMeter$",
-                r"^b3DefaultDistanceJointDef$", r"^b3DefaultMotorJointDef$",
-                r"^b3DefaultParallelJointDef$", r"^b3DefaultPrismaticJointDef$",
-                r"^b3DefaultRevoluteJointDef$", r"^b3DefaultSphericalJointDef$",
-                r"^b3DefaultWeldJointDef$", r"^b3DefaultWheelJointDef$",
-                r"^b3DefaultFilterJointDef$", r"^b3DefaultExplosionDef$",
-                r"^b3DefaultCapsuleMoverDef$"],
-}
+#
+# All domain rules live in config.yaml `domain_rules` (an ordered list of
+# [domain, pattern] pairs; first match wins). Nothing is hardcoded here.
 
 
-def classify_domain(name: str) -> str:
-    """Classify a function name into a domain based on naming patterns."""
-    for domain, patterns in _DOMAIN_PATTERNS.items():
-        for pattern in patterns:
-            if re.match(pattern, name):
-                return domain
+def classify_domain(name: str, rules: list | None = None) -> str:
+    """Classify a function name into a domain based on config rules.
+
+    ``rules`` (config.yaml ``domain_rules``) is an ordered list of
+    ``[domain, pattern]`` pairs matched top-to-bottom; the first match wins.
+    Returns ``"other"`` when nothing matches.
+    """
+    for domain, pattern in rules or []:
+        if re.match(pattern, name):
+            return domain
     return "other"

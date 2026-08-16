@@ -1,7 +1,7 @@
-#include "../api/box3d_api.hpp"
-#include "../api/box3d_api_helpers.hpp"
+#include "box3d_api.hpp"
+#include "box3d_api_helpers.hpp"
 #include "../misc/type_conversions.hpp"
-#include "../bindings/data_classes/data_classes.gen.hpp"
+#include "bindings/data_classes/data_classes.gen.hpp"
 
 #include <box3d/collision.h>
 
@@ -24,4 +24,12 @@ Ref<Box3DPlaneSolverResult> Box3DAPI::solve_planes(Vector3 p_target_delta, Array
 	}
 
 	return _from_b3_to_ref<b3PlaneSolverResult, Box3DPlaneSolverResult>(result);
+}
+
+Ref<Box3DDistanceOutput> Box3DAPI::shape_distance(const Ref<Box3DDistanceInput> &p_input, const Ref<Box3DSimplexCache> &p_cache) {
+	ERR_FAIL_NULL_V(p_input, Ref<Box3DDistanceOutput>());
+	ERR_FAIL_NULL_V(p_cache, Ref<Box3DDistanceOutput>());
+	// Debug simplexes are optional (NULL, 0); the simplex cache is still in/out.
+	return _from_b3_to_ref<b3DistanceOutput, Box3DDistanceOutput>(
+			b3ShapeDistance(p_input->ptr(), p_cache->ptr(), nullptr, 0));
 }

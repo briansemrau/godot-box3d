@@ -121,7 +121,7 @@ def classify_function(func, data: dict, type_map: dict) -> FuncVerdict:
     Also attaches detected ``array_info`` to the function's params so the
     array-aware stub generators can read it directly.
     """
-    domain = classify_domain(func.name)
+    domain = classify_domain(func.name, rules=type_map.get("domain_rules"))
     godot_name = to_godot_name(func.name)
     skip_functions = set(type_map.get("skip_functions", []))
     handwritten_functions = set(type_map.get("handwritten_functions", []))

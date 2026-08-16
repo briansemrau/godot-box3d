@@ -10,7 +10,7 @@ from pathlib import Path
 
 from classification import blob_structs, infer_clone_fn, infer_destroy_fn, prepare_type_map
 from config import load_config
-from naming import data_class_filename, packed_array_type, to_godot_class_name, to_snake_case
+from naming import data_class_filename, godot_param_type, packed_array_type, to_godot_class_name, to_snake_case
 from parser import (
     Struct,
     parse_headers,
@@ -165,7 +165,7 @@ def generate_header(struct: Struct, type_map: dict, all_struct_names: set,
         '#include <godot_cpp/variant/packed_int32_array.hpp>',
         '#include <godot_cpp/variant/packed_float32_array.hpp>',
         "",
-        '#include "../../misc/type_conversions.hpp"',
+        '#include "../../../misc/type_conversions.hpp"',
         "",
     ]
 
@@ -230,7 +230,7 @@ def generate_header(struct: Struct, type_map: dict, all_struct_names: set,
         prop_name = to_snake_case(field.name)
 
         lines.append(f"{T}{godot_type} get_{prop_name}() const;")
-        lines.append(f"{T}void set_{prop_name}({godot_type} p_value);")
+        lines.append(f"{T}void set_{prop_name}({godot_param_type(godot_type)} p_value);")
 
     # to_b3 / from_b3 / ptr / copy
     lines.append(f"{T}{struct.name} to_b3() const;")
@@ -398,7 +398,7 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
         if cls == FieldClassification.ARRAY:
             size = field.array_size
             packed = packed_array_type(field.type) or "PackedInt32Array"
-            lines.append(f"void {cls_name}::set_{prop_name}({packed} {param}) {{")
+            lines.append(f"void {cls_name}::set_{prop_name}({godot_param_type(packed)} {param}) {{")
             lines.append(f"{T}_unpack_array({param}, _data_ptr->{field.name}, {size});")
             lines.append("}")
             lines.append("")
@@ -408,7 +408,7 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
             elem = pair_elem_b3_type(field)
             storage = pair_storage_name(field.name)
             conv = "godot_to_b3" if pair_is_math(field, type_map) else ""
-            lines.append(f"void {cls_name}::set_{prop_name}({packed} {param}) {{")
+            lines.append(f"void {cls_name}::set_{prop_name}({godot_param_type(packed)} {param}) {{")
             lines.append(f"{T}int n = {param}.size();")
             lines.append(f"{T}godot::Vector<{elem}> tmp;")
             lines.append(f"{T}tmp.resize(n);")
@@ -425,7 +425,7 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
             lines.append("")
         elif cls == FieldClassification.NESTED_PAIR_STRUCT:
             nested_cls = to_godot_class_name(field.type)
-            lines.append(f"void {cls_name}::set_{prop_name}({godot_type} {param}) {{")
+            lines.append(f"void {cls_name}::set_{prop_name}({godot_param_type(godot_type)} {param}) {{")
             lines.append(f"{T}if ({param}.is_valid()) {{")
             lines.append(f"{T}{T}const {field.type}* src = {param}->ptr();")
             field_pairs = [(path, leaf_field, count_field) for path, leaf_field, count_field in pairs if path.startswith(field.name + ".")]
@@ -454,7 +454,7 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
             lines.append("")
         elif cls == FieldClassification.NESTED_STRUCT:
             nested_cls = to_godot_class_name(field.type)
-            lines.append(f"void {cls_name}::set_{prop_name}({godot_type} {param}) {{")
+            lines.append(f"void {cls_name}::set_{prop_name}({godot_param_type(godot_type)} {param}) {{")
             lines.append(f"{T}if ({param}.is_valid()) {{")
             lines.append(f"{T}{T}_data_ptr->{field.name} = {param}->to_b3();")
             lines.append(f"{T}}}")
@@ -462,7 +462,7 @@ def generate_implementation(struct: Struct, type_map: dict, all_struct_names: se
             lines.append("")
         else:
             conv = convert_to_b3(param, field.type, type_map)
-            lines.append(f"void {cls_name}::set_{prop_name}({godot_type} {param}) {{")
+            lines.append(f"void {cls_name}::set_{prop_name}({godot_param_type(godot_type)} {param}) {{")
             lines.append(f"{T}_data_ptr->{field.name} = {conv};")
             lines.append("}")
             lines.append("")
@@ -595,7 +595,7 @@ def generate_blob_header(struct: Struct, type_map: dict, all_struct_names: set,
         '#include <godot_cpp/variant/packed_int32_array.hpp>',
         '#include <godot_cpp/variant/packed_float32_array.hpp>',
         "",
-        '#include "../../misc/type_conversions.hpp"',
+        '#include "../../../misc/type_conversions.hpp"',
         "",
         "using namespace godot;",
         "",
@@ -615,7 +615,7 @@ def generate_blob_header(struct: Struct, type_map: dict, all_struct_names: set,
         cpp = _blob_field_type(field, cls, type_map)
         prop_name = to_snake_case(field.name)
         lines.append(f"{T}{cpp} get_{prop_name}() const;")
-        lines.append(f"{T}void set_{prop_name}({cpp} p_value);")
+        lines.append(f"{T}void set_{prop_name}({godot_param_type(cpp)} p_value);")
 
     if infer_clone_fn(struct.name, data):
         lines.append(f"{T}Ref<{cls_name}> copy() const;")
@@ -646,6 +646,7 @@ def generate_blob_implementation(struct: Struct, type_map: dict, all_struct_name
         "using namespace godot;",
         "",
         f"{cls_name}::{cls_name}() : _data_ptr(nullptr), _owns(false) {{",
+        "",
         "}",
         "",
         f"{cls_name}::~{cls_name}() {{",
@@ -683,10 +684,12 @@ def generate_blob_implementation(struct: Struct, type_map: dict, all_struct_name
             size = field.array_size
             packed = packed_array_type(field.type) or "PackedInt32Array"
             lines.append(f"{packed} {cls_name}::get_{prop_name}() const {{")
+            lines.append(f"{T}ERR_FAIL_COND_V_MSG(_data_ptr == nullptr, {packed}(), \"Blob data is null. Blob data classes cannot be instantiated.\");")
             lines.append(f"{T}return _make_packed_array(_data_ptr->{field.name}, {packed}(), (size_t){size});")
             lines.append("}")
             lines.append("")
-            lines.append(f"void {cls_name}::set_{prop_name}({packed} {param}) {{")
+            lines.append(f"void {cls_name}::set_{prop_name}({godot_param_type(packed)} {param}) {{")
+            lines.append(f"{T}ERR_FAIL_COND_MSG(_data_ptr == nullptr, \"Blob data is null. Blob data classes cannot be instantiated.\");")
             lines.append(f"{T}_unpack_array({param}, _data_ptr->{field.name}, {size});")
             lines.append("}")
             lines.append("")
@@ -694,11 +697,13 @@ def generate_blob_implementation(struct: Struct, type_map: dict, all_struct_name
             cpp = _blob_field_type(field, cls, type_map)
             conv = convert_to_godot(f"_data_ptr->{field.name}", field.type, type_map)
             lines.append(f"{cpp} {cls_name}::get_{prop_name}() const {{")
+            lines.append(f"{T}ERR_FAIL_COND_V_MSG(_data_ptr == nullptr, {cpp}{{}}, \"Blob data is null. Blob data classes cannot be instantiated.\");")
             lines.append(f"{T}return {conv};")
             lines.append("}")
             lines.append("")
             cb = convert_to_b3(param, field.type, type_map)
-            lines.append(f"void {cls_name}::set_{prop_name}({cpp} {param}) {{")
+            lines.append(f"void {cls_name}::set_{prop_name}({godot_param_type(cpp)} {param}) {{")
+            lines.append(f"{T}ERR_FAIL_COND_MSG(_data_ptr == nullptr, \"Blob data is null. Blob data classes cannot be instantiated.\");")
             lines.append(f"{T}_data_ptr->{field.name} = {cb};")
             lines.append("}")
             lines.append("")
@@ -736,6 +741,12 @@ def generate_blob_implementation(struct: Struct, type_map: dict, all_struct_name
             f'{T}ADD_PROPERTY(PropertyInfo({variant_type}, "{prop_name}"), '
             f'"set_{prop_name}", "get_{prop_name}");'
         )
+    
+    # Set default values manually to avoid a flood of warnings/errors on extension initialization
+    # TODO blocked by https://github.com/godotengine/godot-cpp/issues/1706
+    # for field, cls in fields:
+    #     prop_name = to_snake_case(field.name)
+    #     lines.append(f"{T}ClassDB::set_property_default_value(\"{cls_name}\", \"{prop_name}\", {{}});")
 
     lines.append("}")
     lines.append("")
@@ -776,7 +787,7 @@ def generate_data_classes(root: str) -> tuple[int, list[str]]:
     deps = compute_struct_dependencies(candidates)
     sorted_structs = topological_sort(candidates, deps)
 
-    out_dir = Path(root) / "src" / "bindings" / "data_classes"
+    out_dir = Path(root) / "src" / "api" / "bindings" / "data_classes"
     # Sweep the whole directory so output always matches the current generator.
     if out_dir.exists():
         shutil.rmtree(out_dir)
@@ -868,7 +879,7 @@ def generate_data_classes(root: str) -> tuple[int, list[str]]:
         "#include <godot_cpp/variant/packed_int32_array.hpp>",
         "#include <godot_cpp/variant/packed_float32_array.hpp>",
         "",
-        '#include "../../misc/type_conversions.hpp"',
+        '#include "../../../misc/type_conversions.hpp"',
         '',
         '#include "data_class_helpers.gen.hpp"',
         "",
@@ -921,7 +932,7 @@ def main():
     args = parser.parse_args()
 
     count, warnings = generate_data_classes(args.root)
-    print(f"Generated {count} data classes in src/bindings/data_classes/")
+    print(f"Generated {count} data classes in src/api/bindings/data_classes/")
 
     if warnings:
         print(f"\nWarnings ({len(warnings)}):")

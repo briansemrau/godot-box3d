@@ -226,6 +226,25 @@ handwritten_functions:
   - b3SolvePlanes
   # Output scalar pointer (implemented as get_milliseconds_and_reset)
   - b3GetMillisecondsAndReset
+  # Collision query with optional debug output (b3Simplex simplexes). We expose
+  # the distance + simplex cache and drop the debug simplex array (pass NULL/0).
+  - b3ShapeDistance
+  # Dual-output creation: returns b3MeshData* AND fills an out-array of
+  # degenerate triangle indices (implemented as a Dictionary).
+  - b3CreateMesh
+  # Pointer-array return (const b3SurfaceMaterial*, count on the compound) —
+  # implemented as a TypedArray.
+  - b3GetCompoundMaterials
+  # Serialization with ownership/lifetime semantics: convert_compound_to_bytes
+  # returns a copy of the blob (scrubbing tree.nodes in a scratch copy so the
+  # source compound stays usable), convert_bytes_to_compound copies the input
+  # into an owned buffer that the compound wrapper frees.
+  - b3ConvertCompoundToBytes
+  - b3ConvertBytesToCompound
+  # Const blob pointer return with no clone function — the shape aliases the
+  # caller's blob (not owns it), so we return an owned deep copy (the blob is
+  # self-contained at byteCount) that survives the shape being destroyed.
+  - b3Shape_GetHeightField
 
 # Array params: overrides for auto-detected array parameters.
 # Most functions are auto-detected. Only entries needing overrides are listed here.
@@ -385,3 +404,51 @@ skip_structs:
   # Recording internals
   - b3RecQueryInfo
   - b3RecQueryHit
+
+# Domain classification — which domain each function is grouped under for the
+# audit report, generated file naming (box3d_api_{domain}.gen.cpp), and docs
+# grouping. Rules are matched top-to-bottom; the first match wins. Specific
+# exceptions are listed FIRST (they'd be shadowed by the broad common pattern
+# below). Anything unmatched falls into "other".
+domain_rules:
+  # --- exceptions (specific functions/families that deviate) ---
+  - [world, "^b3(GetWorldCount|GetMaxWorldCount)$"]
+  - [recording, "^b3(SaveRecordingToFile|LoadRecordingFromFile|ValidateReplay)$"]
+  - [global, "^b3(GetVersion|GetByteCount|GetTicks|GetMilliseconds\\w*|GetLengthUnitsPerMeter|GetStallThreshold)$"]
+  - [global, "^b3(Atan2|Steiner|LineDistance|PointToSegmentDistance|SegmentDistance|Hash|InternalAssert|Sleep|Yield)$"]
+  - [collision, "^b3GetCompound\\w+$"]
+  - [collision, "^b3(GetHeight|GetGraphColor|GetSweepTransform|ScaleBox|ClipVector|SolvePlanes|ShapeDistance|TimeOfImpact|LoadHeightField|DumpHeightData)$"]
+  - [collision, "^b3(ConvertBytesToCompound|ConvertCompoundToBytes)$"]
+  # --- common naming pattern (b3<Subject>_ methods, lifecycle/query families) ---
+  - [body, "^b3Body_"]
+  - [shape, "^b3Shape_"]
+  - [world, "^b3World_"]
+  - [contact, "^b3Contact_"]
+  - [collision, "^b3DynamicTree_"]
+  - [recording, "^b3(Recording|RecPlayer)_"]
+  - [joint, "^b3\\w*Joint_"]
+  - [shape, "^b3(Create|Destroy)\\w*Shape$"]
+  - [joint, "^b3(Create|Destroy)\\w*Joint$"]
+  - [world, "^b3(Create|Destroy)World$"]
+  - [body, "^b3(Create|Destroy)Body$"]
+  - [recording, "^b3(Create|Destroy)\\w*Recording$"]
+  - [collision, "^b3(Create|Destroy)\\w+"]
+  - [collision, "^b3(Overlap|RayCast|ShapeCast|Collide|Compute|Query|Clone|Make)\\w*"]
+  - [global, "^b3Default\\w+"]
+  - [global, "^b3Is\\w+"]
+  - [global, "^b3Set\\w+"]
+
+# Extra headers included in each generated box3d_api_{domain}.gen.cpp file.
+# Paths are relative to src/api/bindings/ and only listed for domains whose
+# generated stubs call helpers declared elsewhere (e.g. RID-owner lookups).
+domain_headers:
+  body:
+    - "../../objects/box3d_body_impl_3d.hpp"
+  shape:
+    - "../../shapes/box3d_shape_instance_3d.hpp"
+    - "../../objects/box3d_body_impl_3d.hpp"
+  joint:
+    - "../../joints/box3d_joint_impl_3d.hpp"
+    - "../../objects/box3d_body_impl_3d.hpp"
+  world:
+    - "../../spaces/box3d_space_3d.hpp"

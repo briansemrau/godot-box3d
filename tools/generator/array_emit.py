@@ -6,7 +6,7 @@ convert results to Godot array types. Array *detection* lives in
 array_detection.py; this module turns the detected metadata into code.
 """
 
-from naming import to_godot_class_name, to_godot_name, to_godot_param_name
+from naming import godot_param_type, to_godot_class_name, to_godot_name, to_godot_param_name
 from parser import ArrayDirection, Function, is_struct_type
 from type_conversions import (
     array_element_godot_type,
@@ -145,7 +145,7 @@ def _generate_output_array_stub(func: Function, type_map: dict) -> str:
     array_godot_type = array_element_godot_type(elem_type, type_map, qualified=False)
 
     godot_params = get_godot_params(func, type_map, qualified=False)
-    params_str = ", ".join(f"{pt} {pn}" for pt, pn in godot_params) if godot_params else ""
+    params_str = ", ".join(f"{godot_param_type(pt)} {pn}" for pt, pn in godot_params) if godot_params else ""
 
     id_info = get_id_param(func, type_map)
 
@@ -258,7 +258,7 @@ def _generate_input_array_stub(func: Function, type_map: dict, blobs: set = None
     is_void = func.return_type == "void"
 
     godot_params = get_godot_params(func, type_map, qualified=False)
-    params_str = ", ".join(f"{pt} {pn}" for pt, pn in godot_params) if godot_params else ""
+    params_str = ", ".join(f"{godot_param_type(pt)} {pn}" for pt, pn in godot_params) if godot_params else ""
 
     id_info = get_id_param(func, type_map)
 
@@ -370,7 +370,7 @@ def _generate_output_struct_stub(func: Function, type_map: dict) -> str:
 
     # Use get_godot_params for consistent header/impl signatures
     godot_params = get_godot_params(func, type_map, qualified=False)
-    params_str = ", ".join(f"{pt} {pn}" for pt, pn in godot_params)
+    params_str = ", ".join(f"{godot_param_type(pt)} {pn}" for pt, pn in godot_params)
 
     # Collect fixed-count array params for call arg generation
     fixed_arrays = [p for p in func.params if p.array_info and p.array_info.fixed_count is not None]
